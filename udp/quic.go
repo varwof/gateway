@@ -168,7 +168,15 @@ func (q *QUICProxy) Start() error {
 
 	ListenerUp.Set(1, q.cfg.Name)
 	q.logger.Info(q.bundle.T(q.lang, "listener.listening"), "name", q.cfg.Name, "listen", q.cfg.Listen, "tls_mode", q.cfg.DisplayTLSMode())
-	go q.serve()
+	// Track the serve loop itself in wg: serve() spawns handleConnection /
+	// handleStream goroutines which also Add() to the same wg, so Stop()'s
+	// wg.Wait() correctly waits for serve to exit (no more Adds) and then for
+	// all in-flight connections/streams to drain.
+	q.wg.Add(1)
+	go func() {
+		defer q.wg.Done()
+		q.serve()
+	}()
 
 	return nil
 }

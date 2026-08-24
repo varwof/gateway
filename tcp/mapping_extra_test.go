@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -167,8 +168,15 @@ func TestMappingHealthCheckFails(t *testing.T) {
 }
 
 func TestMappingHealthCheckHTTP(t *testing.T) {
+	// Single server whose handler switches between 500 and 200, so the health
+	// check URL field is never mutated concurrently with the check loop.
+	healthy := &atomic.Bool{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+		if healthy.Load() {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 	}))
 	defer srv.Close()
 
@@ -199,11 +207,7 @@ func TestMappingHealthCheckHTTP(t *testing.T) {
 		return !m.Healthy()
 	}, "health check (HTTP 500) to mark unhealthy")
 
-	okSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer okSrv.Close()
-	m.cfg.TCPExt.HealthCheckURL = okSrv.URL
+	healthy.Store(true)
 
 	waitFor(t, 10*time.Second, func() bool {
 		return m.Healthy()
