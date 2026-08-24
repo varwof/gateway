@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -19,38 +22,38 @@ import (
 
 // Gateway is a TCP Layer 4 zero-trust security gateway instance.
 type Gateway struct {
-	bundle       *Bundle
-	lang         string
-	logger       *slog.Logger
-	cfg          *Config
-	mappings     map[string]*Mapping
-	tunnels      map[string]*Tunnel
-	crlCaches    map[string]*gw.CRLCache
-	ocspCaches   map[string]*gw.OCSPCache
-	audit        *gw.AuditLogger
-	tsa          *gw.TSAClient
-	auditChain   *gw.AuditChain
-	tsaProof     *gw.TSAProofLogger
-	mu           sync.RWMutex
-	stopCh       chan struct{}
-	renewalCh    chan struct{}
-	revoker      *gw.Revoker
-	stopGuard    *gw.StopGuard
-	mgmt         *gw.ManagementServer
-	mesh         *Mesh
-	meshListener net.Listener
-	connRegistry    *gw.ConnRegistry
-	pluginRegistry  *gw.PluginRegistry
-	policyMgr       *gw.PolicyManager
-	nonceCache      *gw.NonceCache
-	connExpiry      *gw.ConnExpiryRegistry
-	connExpiryStop  func()
-	renewalMgr      *gw.ConfirmedRenewalManager
-	auditIndex      *gw.AuditIndex
-	riskMonitor     *gw.RiskMonitor
-	chainRefs       *gw.ChainRefStore
-	chainSyncer     *gw.ChainSyncer
-	capReg          *capreg.Loader
+	bundle         *Bundle
+	lang           string
+	logger         *slog.Logger
+	cfg            *Config
+	mappings       map[string]*Mapping
+	tunnels        map[string]*Tunnel
+	crlCaches      map[string]*gw.CRLCache
+	ocspCaches     map[string]*gw.OCSPCache
+	audit          *gw.AuditLogger
+	tsa            *gw.TSAClient
+	auditChain     *gw.AuditChain
+	tsaProof       *gw.TSAProofLogger
+	mu             sync.RWMutex
+	stopCh         chan struct{}
+	renewalCh      chan struct{}
+	revoker        *gw.Revoker
+	stopGuard      *gw.StopGuard
+	mgmt           *gw.ManagementServer
+	mesh           *Mesh
+	meshListener   net.Listener
+	connRegistry   *gw.ConnRegistry
+	pluginRegistry *gw.PluginRegistry
+	policyMgr      *gw.PolicyManager
+	nonceCache     *gw.NonceCache
+	connExpiry     *gw.ConnExpiryRegistry
+	connExpiryStop func()
+	renewalMgr     *gw.ConfirmedRenewalManager
+	auditIndex     *gw.AuditIndex
+	riskMonitor    *gw.RiskMonitor
+	chainRefs      *gw.ChainRefStore
+	chainSyncer    *gw.ChainSyncer
+	capReg         *capreg.Loader
 }
 
 // NewGateway creates a TCP gateway instance.
@@ -60,24 +63,24 @@ func NewGateway(cfg *Config, bundle *Bundle, lang string, audit *gw.AuditLogger,
 	}
 	cfg.SetDefaults()
 	g := &Gateway{
-		bundle:     bundle,
-		lang:       lang,
-		logger:     logger,
-		cfg:        cfg,
-		mappings:   make(map[string]*Mapping),
-		tunnels:    make(map[string]*Tunnel),
-		crlCaches:  make(map[string]*gw.CRLCache),
-		ocspCaches: make(map[string]*gw.OCSPCache),
-		audit:      audit,
-		tsa:        tsa,
-		auditChain: gw.NewAuditChain(1000, nil),
-		tsaProof:      tsaProof,
-		stopCh:        make(chan struct{}),
-		renewalCh:     make(chan struct{}),
-		stopGuard:     gw.NewStopGuard(),
-		connRegistry:  gw.NewConnRegistry(),
-		nonceCache:    gw.NewNonceCache(),
-		connExpiry:    gw.NewConnExpiryRegistry(),
+		bundle:       bundle,
+		lang:         lang,
+		logger:       logger,
+		cfg:          cfg,
+		mappings:     make(map[string]*Mapping),
+		tunnels:      make(map[string]*Tunnel),
+		crlCaches:    make(map[string]*gw.CRLCache),
+		ocspCaches:   make(map[string]*gw.OCSPCache),
+		audit:        audit,
+		tsa:          tsa,
+		auditChain:   gw.NewAuditChain(1000, nil),
+		tsaProof:     tsaProof,
+		stopCh:       make(chan struct{}),
+		renewalCh:    make(chan struct{}),
+		stopGuard:    gw.NewStopGuard(),
+		connRegistry: gw.NewConnRegistry(),
+		nonceCache:   gw.NewNonceCache(),
+		connExpiry:   gw.NewConnExpiryRegistry(),
 	}
 	if tsaProof != nil {
 		tsaProof.SetAuditChain(g.auditChain)
@@ -107,8 +110,8 @@ func NewGateway(cfg *Config, bundle *Bundle, lang string, audit *gw.AuditLogger,
 	g.policyMgr = gw.NewPolicyManager(g.pluginRegistry)
 	if cfg.RiskMonitor != nil {
 		g.riskMonitor = gw.NewRiskMonitor(gw.RiskMonitorConfig{
-			Rules:   cfg.RiskMonitor.Rules,
-			Logger:  logger,
+			Rules:  cfg.RiskMonitor.Rules,
+			Logger: logger,
 			OnAction: func(agentId, action, reason string) {
 				g.handleRiskAction(agentId, action, reason)
 			},
@@ -303,7 +306,12 @@ func (g *Gateway) Start() error {
 			m.SetMesh(g.mesh)
 		}
 		m.pluginRegistry = g.pluginRegistry
-		m.policyVersion = func() uint64 { if g.policyMgr == nil { return 0 }; return g.policyMgr.CurrentVersion() }
+		m.policyVersion = func() uint64 {
+			if g.policyMgr == nil {
+				return 0
+			}
+			return g.policyMgr.CurrentVersion()
+		}
 		m.policyResolver = func(agentID string) (uint64, *gw.PluginRegistry) {
 			if g.policyMgr == nil {
 				return 0, nil
@@ -867,7 +875,12 @@ func (g *Gateway) Reload() error {
 				m.SetMesh(g.mesh)
 			}
 			m.pluginRegistry = g.pluginRegistry
-			m.policyVersion = func() uint64 { if g.policyMgr == nil { return 0 }; return g.policyMgr.CurrentVersion() }
+			m.policyVersion = func() uint64 {
+				if g.policyMgr == nil {
+					return 0
+				}
+				return g.policyMgr.CurrentVersion()
+			}
 			m.policyResolver = func(agentID string) (uint64, *gw.PluginRegistry) {
 				if g.policyMgr == nil {
 					return 0, nil
@@ -895,25 +908,35 @@ func (g *Gateway) Reload() error {
 					// W40 (2026-08-16): Key by mapping name.
 					g.crlCaches[name+"/crl"] = crlCache
 				}
-			ocspCache := buildOCSPCache(mc.TLS, g.bundle, g.lang)
-			m, err := NewMapping(mc, crlCache, ocspCache, g.audit, g.tsa, g.bundle, g.lang, g.revoker, g.logger, g.connRegistry, g.nonceCache)
-			if err != nil {
-				return fmt.Errorf("restart mapping %q during reload: %w", name, err)
-			}
-			if mc.Protocol == ProtocolTCPMesh && g.mesh != nil {
-				m.SetMesh(g.mesh)
-			}
-			m.pluginRegistry = g.pluginRegistry
-			m.policyVersion = func() uint64 { if g.policyMgr == nil { return 0 }; return g.policyMgr.CurrentVersion() }
-			m.riskMonitor = g.riskMonitor
-			if err := m.Start(); err != nil {
-				return fmt.Errorf("create mapping %q during reload: %w", name, err)
-			}
-			newMappings[name] = m
-			g.logger.Info(g.bundle.T(g.lang, "reload.mapping_restarted"), "name", name)
+				ocspCache := buildOCSPCache(mc.TLS, g.bundle, g.lang)
+				m, err := NewMapping(mc, crlCache, ocspCache, g.audit, g.tsa, g.bundle, g.lang, g.revoker, g.logger, g.connRegistry, g.nonceCache)
+				if err != nil {
+					return fmt.Errorf("restart mapping %q during reload: %w", name, err)
+				}
+				if mc.Protocol == ProtocolTCPMesh && g.mesh != nil {
+					m.SetMesh(g.mesh)
+				}
+				m.pluginRegistry = g.pluginRegistry
+				m.policyVersion = func() uint64 {
+					if g.policyMgr == nil {
+						return 0
+					}
+					return g.policyMgr.CurrentVersion()
+				}
+				m.riskMonitor = g.riskMonitor
+				if err := m.Start(); err != nil {
+					return fmt.Errorf("create mapping %q during reload: %w", name, err)
+				}
+				newMappings[name] = m
+				g.logger.Info(g.bundle.T(g.lang, "reload.mapping_restarted"), "name", name)
 			} else {
 				old.pluginRegistry = g.pluginRegistry
-				old.policyVersion = func() uint64 { if g.policyMgr == nil { return 0 }; return g.policyMgr.CurrentVersion() }
+				old.policyVersion = func() uint64 {
+					if g.policyMgr == nil {
+						return 0
+					}
+					return g.policyMgr.CurrentVersion()
+				}
 				old.policyResolver = func(agentID string) (uint64, *gw.PluginRegistry) {
 					if g.policyMgr == nil {
 						return 0, nil

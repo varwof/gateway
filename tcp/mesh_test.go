@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -208,8 +211,8 @@ func TestStartMeshListenerValid(t *testing.T) {
 		cfg: &Config{
 			MeshListen: "127.0.0.1:0",
 			// W01 (2026-08-16): Mesh protocol enforces symmetric mTLS — inbound must
-		// configure full mesh_server_tls, otherwise startup is rejected (old behavior
-		// silently listens in plaintext = cross-node forwarding guaranteed to fail + SSRF vector).
+			// configure full mesh_server_tls, otherwise startup is rejected (old behavior
+			// silently listens in plaintext = cross-node forwarding guaranteed to fail + SSRF vector).
 			MeshServerTLS: &gw.TLSConfig{
 				CACertFile: filepath.Join(dir, "ca.pem"),
 				CertFile:   filepath.Join(dir, "server.pem"),

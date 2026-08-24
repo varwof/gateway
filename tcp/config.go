@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -634,9 +637,9 @@ func buildMappingFromKV(kv map[string]string) MappingConfig {
 			mc.TLS.DisconnectOnExpiry = &f
 		}
 		mc.TCPExt = &gw.TCPExtra{
-			HealthCheckSec:  parseInt(kv["health-check-sec"]),
-			DialTimeoutSec:  parseInt(kv["dial-timeout-sec"]),
-			HealthCheckURL:  kv["health-check-url"],
+			HealthCheckSec: parseInt(kv["health-check-sec"]),
+			DialTimeoutSec: parseInt(kv["dial-timeout-sec"]),
+			HealthCheckURL: kv["health-check-url"],
 		}
 	}
 	return mc

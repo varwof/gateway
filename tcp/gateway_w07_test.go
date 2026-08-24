@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -39,10 +42,10 @@ func makeAICClientCertWithConstraint(t *testing.T, dir string, caCert *x509.Cert
 	t.Helper()
 	clientKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	aic := gw.AIC{
-		Version:      1,
-		AgentId:      "g3-recheck-client",
-		PrincipalUid: gw.PrincipalUid{Version: 1, Realm: "varwof", Identifier: "user@varwof.com", KeyHash: make([]byte, 32)},
-		Capabilities: []gw.Capability{{SchemeId: "http", CapabilityId: "gateway:read"}},
+		Version:                  1,
+		AgentId:                  "g3-recheck-client",
+		PrincipalUid:             gw.PrincipalUid{Version: 1, Realm: "varwof", Identifier: "user@varwof.com", KeyHash: make([]byte, 32)},
+		Capabilities:             []gw.Capability{{SchemeId: "http", CapabilityId: "gateway:read"}},
 		AuthorizationConstraints: []gw.Capability{constraint},
 		DelegationAuthorization: gw.DelegationAuthorization{
 			SignatureValue:     []byte{},

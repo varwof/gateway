@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -350,7 +353,7 @@ func TestHandleRenew(t *testing.T) {
 		g := newTestGateway()
 		pem := pubKeyPEM(t)
 		body, err := json.Marshal(map[string]string{
-			"serial_hex":     "4242",
+			"serial_hex":      "4242",
 			"new_pub_key_pem": pem,
 		})
 		if err != nil {
@@ -368,7 +371,7 @@ func TestHandleRenew(t *testing.T) {
 		g.cfg.ShortLived = &gw.IssueConfig{}
 		pem := pubKeyPEM(t)
 		body, err := json.Marshal(map[string]string{
-			"serial_hex":     "4242",
+			"serial_hex":      "4242",
 			"new_pub_key_pem": pem,
 		})
 		if err != nil {

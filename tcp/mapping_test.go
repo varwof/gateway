@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -27,9 +30,9 @@ func TestMappingPlainTCP(t *testing.T) {
 	defer echoSrv.Close()
 
 	cfg := MappingConfig{
-		Name:    "test-plain",
-		Listen:  "127.0.0.1:0",
-		Target:  echoSrv.Addr().String(),
+		Name:     "test-plain",
+		Listen:   "127.0.0.1:0",
+		Target:   echoSrv.Addr().String(),
 		Protocol: ProtocolTCP,
 	}
 	m, err := NewMapping(cfg, nil, nil, nil, nil, nil, "en", nil, nil, nil, nil)
@@ -143,11 +146,11 @@ func TestMappingMTLSRequireUserAuthDenied(t *testing.T) {
 		PrincipalUid: gw.PrincipalUid{Version: 1, Realm: "varwof", Identifier: "user@varwof.com"},
 		DelegationAuthorization: gw.DelegationAuthorization{
 			// Empty signature + no Provider → RequireUserAuth should fail-closed reject
-			SignatureValue:    []byte{},
+			SignatureValue:     []byte{},
 			SignatureAlgorithm: gw.AlgorithmIdentifier{Algorithm: asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}},
-			Timestamp:         time.Now(),
-			Nonce:             make([]byte, 32),
-			RequestedLifetime: 3600,
+			Timestamp:          time.Now(),
+			Nonce:              make([]byte, 32),
+			RequestedLifetime:  3600,
 		},
 	}
 	aicDER, err := asn1.Marshal(aicExt)
@@ -175,9 +178,9 @@ func TestMappingMTLSRequireUserAuthDenied(t *testing.T) {
 
 	requireUserAuth := true
 	cfg := MappingConfig{
-		Name:    "test-req-user-auth",
-		Listen:  "127.0.0.1:0",
-		Target:  echoSrv.Addr().String(),
+		Name:     "test-req-user-auth",
+		Listen:   "127.0.0.1:0",
+		Target:   echoSrv.Addr().String(),
 		Protocol: ProtocolTCPMTLS,
 		TLS: &gw.TLSConfig{
 			CACertFile:      filepath.Join(dir, "ca.pem"),
@@ -232,11 +235,11 @@ func TestMappingMTLSRejected(t *testing.T) {
 	generateTestCert(t, dir, "server", caCert, caKey, nil)
 	wrongCAKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	wrongCATmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(99),
-		Subject:      pkix.Name{CommonName: "Wrong CA"},
-		NotBefore:    time.Now().Add(-1 * time.Hour),
-		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
-		IsCA:         true,
+		SerialNumber:          big.NewInt(99),
+		Subject:               pkix.Name{CommonName: "Wrong CA"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
 	wrongCADER, _ := x509.CreateCertificate(rand.Reader, wrongCATmpl, wrongCATmpl, &wrongCAKey.PublicKey, wrongCAKey)
@@ -258,9 +261,9 @@ func TestMappingMTLSRejected(t *testing.T) {
 	defer echoSrv.Close()
 
 	cfg := MappingConfig{
-		Name:    "test-reject",
-		Listen:  "127.0.0.1:0",
-		Target:  echoSrv.Addr().String(),
+		Name:     "test-reject",
+		Listen:   "127.0.0.1:0",
+		Target:   echoSrv.Addr().String(),
 		Protocol: ProtocolTCPMTLS,
 		TLS: &gw.TLSConfig{
 			CACertFile: filepath.Join(dir, "ca.pem"),
@@ -476,11 +479,11 @@ func generateTestCA(t *testing.T, dir string) (*x509.Certificate, *rsa.PrivateKe
 		t.Fatal(err)
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "Test CA"},
-		NotBefore:    time.Now().Add(-1 * time.Hour),
-		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Test CA"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
@@ -776,5 +779,3 @@ func TestMappingMTLSAllowedCIDRsAllow(t *testing.T) {
 		t.Errorf("got %q, want %q", reply, msg)
 	}
 }
-
-

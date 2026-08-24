@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -27,19 +30,19 @@ const (
 	// TunnelRunning indicates the tunnel is running.
 	TunnelRunning TunnelState = "running"
 	// TunnelFailed indicates the tunnel failed to start.
-	TunnelFailed  TunnelState = "failed"
+	TunnelFailed TunnelState = "failed"
 )
 
 // Tunnel is a TCP tunnel instance that connects to the gateway via mTLS.
 type Tunnel struct {
-	cfg     TunnelConfig
-	tlsCfg  *tls.Config
-	logger  *slog.Logger
-	state   atomic.Value
-	mu      sync.Mutex
-	stopCh  chan struct{}
-	wg      sync.WaitGroup
-	conns   int64
+	cfg    TunnelConfig
+	tlsCfg *tls.Config
+	logger *slog.Logger
+	state  atomic.Value
+	mu     sync.Mutex
+	stopCh chan struct{}
+	wg     sync.WaitGroup
+	conns  int64
 }
 
 // NewTunnel creates a TCP tunnel instance.

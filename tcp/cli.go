@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -174,19 +177,19 @@ func runServer(args []string) {
 
 	if hasCLI {
 		cfg, err = BuildConfigFromCLI(maps.values, tunnels.values, &CLIGlobals{
-			CRLRefreshSec:   *crlRefreshSec,
-			OCSPCacheTTLSec: *ocspCacheTTL,
-			OCSPFallback:    *ocspFallback,
-			TSAURL:          *tsaURL,
-			TSACertFile:     *tsaCertFile,
-			AuditFile:       *auditFile,
-			AuditMaxSizeMB:  *auditMaxSizeMB,
-			AuditMaxBackups: *auditMaxBackups,
-			MgmtListen:      *mgmtListen,
-			MgmtCACert:      *mgmtCACert,
-			MgmtCert:        *mgmtCert,
-			MgmtKey:         *mgmtKey,
-			MgmtCRLURL:      *mgmtCRLURL,
+			CRLRefreshSec:    *crlRefreshSec,
+			OCSPCacheTTLSec:  *ocspCacheTTL,
+			OCSPFallback:     *ocspFallback,
+			TSAURL:           *tsaURL,
+			TSACertFile:      *tsaCertFile,
+			AuditFile:        *auditFile,
+			AuditMaxSizeMB:   *auditMaxSizeMB,
+			AuditMaxBackups:  *auditMaxBackups,
+			MgmtListen:       *mgmtListen,
+			MgmtCACert:       *mgmtCACert,
+			MgmtCert:         *mgmtCert,
+			MgmtKey:          *mgmtKey,
+			MgmtCRLURL:       *mgmtCRLURL,
 			MgmtOCSPFallback: *mgmtOCSPFallback,
 		})
 		if err != nil {

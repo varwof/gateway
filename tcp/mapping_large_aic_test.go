@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -120,9 +123,9 @@ func TestLargeAIC_TCP(t *testing.T) {
 			defer echoSrv.Close()
 
 			cfg := MappingConfig{
-				Name:    "test-large-aic",
-				Listen:  "127.0.0.1:0",
-				Target:  echoSrv.Addr().String(),
+				Name:     "test-large-aic",
+				Listen:   "127.0.0.1:0",
+				Target:   echoSrv.Addr().String(),
 				Protocol: ProtocolTCPMTLS,
 				TLS: &gw.TLSConfig{
 					CACertFile: filepath.Join(dir, "ca.pem"),
@@ -157,7 +160,7 @@ func TestLargeAIC_TCP(t *testing.T) {
 			}
 			defer conn.Close()
 
-		// Test data send/receive
+			// Test data send/receive
 			testMsg := []byte("hello-large-aic\n")
 			if _, err := conn.Write(testMsg); err != nil {
 				t.Fatalf("write failed: %v", err)

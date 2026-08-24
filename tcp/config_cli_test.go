@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -81,8 +84,8 @@ func TestBuildMappingFromKVMTLS(t *testing.T) {
 		"max-conns-per-ip": "10", "max-total-conns": "100", "idle-timeout-sec": "60",
 		"health-check-sec": "5", "health-check-url": "http://hc",
 		"audit-max-size-mb": "50", "audit-max-backups": "5",
-		"cipher-suites": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;TLS_AES_128_GCM_SHA256",
-		"min-tls-version": "1.2",
+		"cipher-suites":        "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;TLS_AES_128_GCM_SHA256",
+		"min-tls-version":      "1.2",
 		"disconnect-on-expiry": "false",
 	})
 	if mc.Protocol != ProtocolTCPMTLS || mc.TLS == nil {

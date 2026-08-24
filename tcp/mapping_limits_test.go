@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -35,9 +38,9 @@ func TestMappingPerIPLimit(t *testing.T) {
 	defer echoSrv.Close()
 
 	cfg := MappingConfig{
-		Name:    "test-ip-limit",
-		Listen:  "127.0.0.1:0",
-		Target:  echoSrv.Addr().String(),
+		Name:     "test-ip-limit",
+		Listen:   "127.0.0.1:0",
+		Target:   echoSrv.Addr().String(),
 		Protocol: ProtocolTCP,
 		TLS: &gw.TLSConfig{
 			MaxConnsPerIP: 2,
@@ -78,9 +81,9 @@ func TestMappingTotalLimit(t *testing.T) {
 	defer echoSrv.Close()
 
 	cfg := MappingConfig{
-		Name:    "test-total-limit",
-		Listen:  "127.0.0.1:0",
-		Target:  echoSrv.Addr().String(),
+		Name:     "test-total-limit",
+		Listen:   "127.0.0.1:0",
+		Target:   echoSrv.Addr().String(),
 		Protocol: ProtocolTCP,
 		TLS: &gw.TLSConfig{
 			MaxTotalConns: 1,
@@ -111,9 +114,9 @@ func TestMappingTotalLimit(t *testing.T) {
 
 func TestMappingHealthCheck(t *testing.T) {
 	cfg := MappingConfig{
-		Name:    "test-hc",
-		Listen:  "127.0.0.1:0",
-		Target:  "127.0.0.1:1",
+		Name:     "test-hc",
+		Listen:   "127.0.0.1:0",
+		Target:   "127.0.0.1:1",
 		Protocol: ProtocolTCP,
 		TCPExt: &gw.TCPExtra{
 			HealthCheckSec: 1,
@@ -137,5 +140,3 @@ func TestMappingHealthCheck(t *testing.T) {
 		t.Errorf("expected State=unhealthy, got %s", m.State())
 	}
 }
-
-

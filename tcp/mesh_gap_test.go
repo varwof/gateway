@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jijie Wei (varwof)
+// SPDX-License-Identifier: Apache-2.0
+
 package tcpgw
 
 import (
@@ -22,12 +25,12 @@ func TestMeshTargetMatcherDefaults(t *testing.T) {
 		target string
 		allow  bool
 	}{
-		{"127.0.0.1:8080", true},   // loopback
-		{"10.0.0.5:22", true},      // RFC1918 private
+		{"127.0.0.1:8080", true},    // loopback
+		{"10.0.0.5:22", true},       // RFC1918 private
 		{"192.168.1.100:443", true}, // private
-		{"172.16.3.9:80", true},    // private
-		{"[::1]:8080", true},       // IPv6 loopback
-		{"[fc00::1]:443", true},    // ULA
+		{"172.16.3.9:80", true},     // private
+		{"[::1]:8080", true},        // IPv6 loopback
+		{"[fc00::1]:443", true},     // ULA
 		{"8.8.8.8:53", false},       // public → rejected
 		{"example.com:443", false},  // public domain → rejected
 	}
@@ -50,14 +53,14 @@ func TestMeshTargetMatcherExplicit(t *testing.T) {
 		target string
 		allow  bool
 	}{
-		{"10.1.2.3:22", true},          // CIDR
-		{"203.0.113.7:8080", true},     // exact host:port
-		{"203.0.113.5:8443", true},     // exact
+		{"10.1.2.3:22", true},             // CIDR
+		{"203.0.113.7:8080", true},        // exact host:port
+		{"203.0.113.5:8443", true},        // exact
 		{"db.internal.example:443", true}, // suffix domain
 		{"api.internal.example:443", true},
-		{"internal.example:443", false},  // bare domain does not match *. suffix
-		{"203.0.113.7:443", false},       // same IP different port
-		{"203.0.113.99:8443", false},     // not in CIDR allowlist
+		{"internal.example:443", false}, // bare domain does not match *. suffix
+		{"203.0.113.7:443", false},      // same IP different port
+		{"203.0.113.99:8443", false},    // not in CIDR allowlist
 	}
 	for _, c := range cases {
 		if got := m.Allow(c.target); got != c.allow {
