@@ -1,0 +1,88 @@
+{
+    "gateway": {
+        "started": "gateway-tcp server started",
+        "shutting_down": "\nshutting down...",
+        "reloading": "reloading configuration...",
+        "reloaded": "reload: configuration reloaded successfully"
+    },
+    "tunnel": {
+        "started": "gateway-tcp tunnel started"
+    },
+    "mapping": {
+        "listening": "mapping %q: listening on %s → %s (mode=%s)",
+        "stopped": "mapping %q: stopped",
+        "accept_error": "mapping %q: accept error: %v",
+        "per_ip_limit": "mapping %q: per-IP limit exceeded for %s (%d > %d)",
+        "total_conn_limit": "mapping %q: total conn limit exceeded (%d > %d)",
+        "backend_unhealthy": "mapping %q: backend unhealthy, rejecting",
+        "tls_handshake_failed": "mapping %q: TLS handshake failed from %s: %v",
+        "dial_target_error": "mapping %q: dial target %s: %v",
+        "already_running": "mapping %q already running"
+    },
+    "auth": {
+        "mtls_required": "mTLS required",
+        "admin_required": "admin role required",
+        "forbidden": "forbidden"
+    },
+    "crl": {
+        "initial_refresh_failed": "crl: initial refresh failed: %v, retrying in 5s...",
+        "refresh_failed": "crl: refresh failed: %v",
+        "refreshed": "crl: refreshed from %s (%d revoked entries, next update %s)"
+    },
+    "ocsp": {
+        "fallback_allow": "ocsp: %s (fallback allow)",
+        "fallback_crl": "ocsp: %s (fallback crl)",
+        "fallback_deny": "ocsp: %s (fallback deny)"
+    },
+    "health": {
+        "check_failed": "mapping %q: health check FAILED: %v",
+        "check_restored": "mapping %q: health check OK (restored)",
+        "http_check": "mapping %q: HTTP health check %s"
+    },
+    "cert": {
+        "expiry_monitor": "mapping %q: client cert %q expires at %s, monitoring active",
+        "expiry_disconnected": "mapping %q: client cert %q expired at %s, connection closed"
+    },
+    "mapping": {
+        "constraint_violated": "mapping %q: authorization constraint recheck violation, disconnecting: %v"
+    },
+    "ocsp_stapling": {
+        "initial_loaded": "ocsp stapling: initial staple loaded for %q",
+        "refresh_error": "ocsp stapling: refresh failed for %q: %v"
+    },
+    "audit": {
+        "tsa_sign_failed": "audit: tsa sign failed: %v (entry will be unsigned)",
+        "write_failed": "audit: write failed: %v",
+        "entry_verified": "audit entry verified OK"
+    },
+    "cli": {
+        "no_config": "no config file and no --map/--tunnel flags",
+        "help_config": "       use --config <path> or --map/--tunnel for CLI mode",
+        "map_required": "at least one --map or --tunnel required in CLI mode"
+    },
+    "err": {
+        "config_not_found": "config file not found at %s",
+        "config_hint": "       specify with --config <path> or use --map/--tunnel",
+        "entry_required": "error: --entry required",
+        "verify_failed": "verification FAILED: %v",
+        "load_config": "error: %v",
+        "reload": "reload error: %v"
+    },
+    "api": {
+        "listening": "management API: listening on %s",
+        "load_cert_error": "management: load cert: %v",
+        "tls_config_error": "management: TLS config: %v",
+        "config_persist": "persist config after add: %v",
+        "config_persist_remove": "persist config after remove: %v",
+        "method_not_allowed": "method not allowed",
+        "mapping_exists": "mapping already exists",
+        "mapping_not_found": "mapping not found",
+        "audit_not_configured": "audit not configured"
+    },
+    "reload": {
+        "mapping_started": "reload: started new mapping %q",
+        "mapping_restarted": "reload: restarted mapping %q",
+        "mapping_stopped": "reload: stopped removed mapping %q",
+        "persist_config": "reload: persist config: %v"
+    }
+}

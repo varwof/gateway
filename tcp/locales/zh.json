@@ -1,0 +1,88 @@
+{
+    "gateway": {
+        "started": "gateway-tcp 服务已启动",
+        "shutting_down": "\n正在关闭...",
+        "reloading": "正在重载配置...",
+        "reloaded": "重载: 配置已成功加载"
+    },
+    "tunnel": {
+        "started": "gateway-tcp 隧道已启动"
+    },
+    "mapping": {
+        "listening": "映射 %q: 监听 %s → %s (模式=%s)",
+        "stopped": "映射 %q: 已停止",
+        "accept_error": "映射 %q: 接受连接错误: %v",
+        "per_ip_limit": "映射 %q: 单 IP 连接数超限 %s (%d > %d)",
+        "total_conn_limit": "映射 %q: 总连接数超限 (%d > %d)",
+        "backend_unhealthy": "映射 %q: 后端不健康，拒绝连接",
+        "tls_handshake_failed": "映射 %q: TLS 握手失败来自 %s: %v",
+        "dial_target_error": "映射 %q: 连接目标 %s 失败: %v",
+        "already_running": "映射 %q 已在运行中"
+    },
+    "auth": {
+        "mtls_required": "需要 mTLS 认证",
+        "admin_required": "需要管理员角色",
+        "forbidden": "禁止访问"
+    },
+    "crl": {
+        "initial_refresh_failed": "CRL: 初始刷新失败: %v，5秒后重试...",
+        "refresh_failed": "CRL: 刷新失败: %v",
+        "refreshed": "CRL: 已从 %s 刷新 (%d 条吊销记录，下次更新 %s)"
+    },
+    "ocsp": {
+        "fallback_allow": "OCSP: %s (回退-允许)",
+        "fallback_crl": "OCSP: %s (回退-CRL)",
+        "fallback_deny": "OCSP: %s (回退-拒绝)"
+    },
+    "health": {
+        "check_failed": "映射 %q: 健康检查失败: %v",
+        "check_restored": "映射 %q: 健康检查通过 (已恢复)",
+        "http_check": "映射 %q: HTTP 健康检查 %s"
+    },
+    "cert": {
+        "expiry_monitor": "映射 %q: 客户端证书 %q 将于 %s 过期，监控已启动",
+        "expiry_disconnected": "映射 %q: 客户端证书 %q 已于 %s 过期，连接已关闭"
+    },
+    "mapping": {
+        "constraint_violated": "映射 %q: 授权约束复查违规，已断开连接: %v"
+    },
+    "ocsp_stapling": {
+        "initial_loaded": "OCSP 装订: 已为 %q 加载初始装订响应",
+        "refresh_error": "OCSP 装订: %q 刷新失败: %v"
+    },
+    "audit": {
+        "tsa_sign_failed": "审计: TSA 签名失败: %v (记录将无签名)",
+        "write_failed": "审计: 写入失败: %v",
+        "entry_verified": "审计记录验证通过"
+    },
+    "cli": {
+        "no_config": "未找到配置文件且未提供 --map/--tunnel 参数",
+        "help_config": "       请使用 --config <路径> 或 --map/--tunnel 命令行模式",
+        "map_required": "CLI 模式下至少需要一个 --map 或 --tunnel"
+    },
+    "err": {
+        "config_not_found": "配置文件未找到: %s",
+        "config_hint": "       请用 --config <路径> 或使用 --map/--tunnel",
+        "entry_required": "错误: 需要 --entry 参数",
+        "verify_failed": "验证失败: %v",
+        "load_config": "错误: %v",
+        "reload": "重载错误: %v"
+    },
+    "api": {
+        "listening": "管理 API: 监听 %s",
+        "load_cert_error": "管理: 加载证书失败: %v",
+        "tls_config_error": "管理: TLS 配置失败: %v",
+        "config_persist": "持久化配置(添加后): %v",
+        "config_persist_remove": "持久化配置(移除后): %v",
+        "method_not_allowed": "方法不允许",
+        "mapping_exists": "映射已存在",
+        "mapping_not_found": "映射未找到",
+        "audit_not_configured": "审计未配置"
+    },
+    "reload": {
+        "mapping_started": "重载: 已启动新映射 %q",
+        "mapping_restarted": "重载: 已重启映射 %q",
+        "mapping_stopped": "重载: 已停止被移除的映射 %q",
+        "persist_config": "重载: 持久化配置: %v"
+    }
+}

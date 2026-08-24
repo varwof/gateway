@@ -1,0 +1,74 @@
+{
+    "gateway": {
+        "started": "gateway-http 服务已启动",
+        "shutting_down": "\n正在关闭...",
+        "reloading": "正在重载配置..."
+    },
+    "listener": {
+        "listening": "监听器 %q: 监听 %s (%s, %d 条路由)",
+        "stopped": "监听器 %q: 已停止",
+        "serve_error": "监听器 %q: 服务错误: %v",
+        "already_running": "监听器 %q 已在运行中"
+    },
+    "auth": {
+        "mtls_required": "需要 mTLS 认证",
+        "admin_required": "需要管理员角色",
+        "forbidden": "禁止访问"
+    },
+    "crl": {
+        "initial_refresh_failed": "CRL: 初始刷新失败: %v，5秒后重试...",
+        "refresh_failed": "CRL: 刷新失败: %v",
+        "refreshed": "CRL: 已从 %s 刷新 (%d 条吊销记录，下次更新 %s)"
+    },
+    "ocsp": {
+        "fallback_allow": "OCSP: %s (回退-允许)",
+        "fallback_crl": "OCSP: %s (回退-CRL)",
+        "fallback_deny": "OCSP: %s (回退-拒绝)"
+    },
+    "http": {
+        "too_many_requests": "连接数过多",
+        "server_busy": "服务繁忙",
+        "mtls_required": "需要 mTLS 认证",
+        "ocsp_denied": "OCSP: %s",
+        "crl_error": "CRL 错误: %s",
+        "cert_revoked": "证书已被吊销",
+        "cert_expired": "客户端证书已于 %s 过期",
+        "no_route": "无匹配路由",
+        "method_not_allowed": "方法不允许",
+        "forbidden": "禁止访问",
+        "cert_conn_limit": "已达每证书连接数上限"
+    },
+    "cert": {
+        "expiry_monitor": "监听器 %q: 客户端证书将于 %s 过期",
+        "expiry_denied": "客户端证书已于 %s 过期"
+    },
+    "ocsp_stapling": {
+        "initial_loaded": "OCSP 装订: 已为 %q 加载初始装订响应",
+        "refresh_error": "OCSP 装订: %q 刷新失败: %v"
+    },
+    "audit": {
+        "tsa_sign_failed": "审计: TSA 签名失败: %v (记录将无签名)",
+        "write_failed": "审计: 写入失败: %v"
+    },
+    "cli": {
+        "no_config": "未找到配置文件且未提供 --listener/--route 参数",
+        "help_config": "       请使用 --config <路径> 或 --listener/--route 命令行模式",
+        "listener_required": "CLI 模式下至少需要一个 --listener 和 --route"
+    },
+    "err": {
+        "config_not_found": "配置文件未找到: %s",
+        "config_hint": "       请用 --config <路径> 或使用 --listener/--route",
+        "load_config": "错误: %v",
+        "reload": "重载错误: %v"
+    },
+    "api": {
+        "listening": "管理 API: 监听 %s",
+        "load_cert_error": "管理: 加载证书失败: %v",
+        "tls_config_error": "管理: TLS 配置失败: %v",
+        "config_persist": "持久化配置: %v",
+        "method_not_allowed": "方法不允许",
+        "listener_exists": "监听器已存在",
+        "listener_not_found": "监听器未找到",
+        "audit_not_configured": "审计未配置"
+    }
+}

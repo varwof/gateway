@@ -1,0 +1,35 @@
+{
+  "gateway": {
+    "started": "UDP 网关已启动",
+    "shutting_down": "正在关闭...",
+    "reloading": "正在重载配置..."
+  },
+  "listener": {
+    "listening": "监听器 %q 已在 %s 上监听 [%s]",
+    "stopped": "监听器 %q 已停止",
+    "already_running": "监听器 %q 已在运行中",
+    "serve_error": "监听器 %q: %v"
+  },
+  "api": {
+    "listening": "管理 API 正在监听 %s",
+    "listener_exists": "监听器已存在",
+    "listener_not_found": "监听器未找到",
+    "method_not_allowed": "方法不允许",
+    "config_persist": "保存配置: %v",
+    "load_cert_error": "加载管理证书: %v",
+    "tls_config_error": "构建管理 TLS 配置: %v",
+    "audit_not_configured": "审计日志未配置"
+  },
+  "auth": {
+    "mtls_required": "需要 mTLS",
+    "admin_required": "需要管理员角色"
+  },
+  "err": {
+    "config_not_found": "配置文件未找到: %s",
+    "load_config": "加载配置: %v",
+    "reload": "重载: %v"
+  },
+  "cli": {
+    "help_config": "使用 --config 指定配置文件"
+  }
+}

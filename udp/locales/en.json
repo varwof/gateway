@@ -1,0 +1,35 @@
+{
+  "gateway": {
+    "started": "UDP gateway started",
+    "shutting_down": "Shutting down...",
+    "reloading": "Reloading configuration..."
+  },
+  "listener": {
+    "listening": "listener %q listening on %s [%s]",
+    "stopped": "listener %q stopped",
+    "already_running": "listener %q is already running",
+    "serve_error": "listener %q: %v"
+  },
+  "api": {
+    "listening": "management API listening on %s",
+    "listener_exists": "listener already exists",
+    "listener_not_found": "listener not found",
+    "method_not_allowed": "method not allowed",
+    "config_persist": "persist config: %v",
+    "load_cert_error": "load management cert: %v",
+    "tls_config_error": "build management TLS config: %v",
+    "audit_not_configured": "audit log not configured"
+  },
+  "auth": {
+    "mtls_required": "mTLS required",
+    "admin_required": "admin role required"
+  },
+  "err": {
+    "config_not_found": "config file not found: %s",
+    "load_config": "load config: %v",
+    "reload": "reload: %v"
+  },
+  "cli": {
+    "help_config": "use --config to specify a config file"
+  }
+}

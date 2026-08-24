@@ -1,0 +1,74 @@
+{
+    "gateway": {
+        "started": "gateway-http server started",
+        "shutting_down": "\nshutting down...",
+        "reloading": "reloading configuration..."
+    },
+    "listener": {
+        "listening": "listener %q: listening on %s (%s, %d routes)",
+        "stopped": "listener %q: stopped",
+        "serve_error": "listener %q: serve error: %v",
+        "already_running": "listener %q already running"
+    },
+    "auth": {
+        "mtls_required": "mTLS required",
+        "admin_required": "admin role required",
+        "forbidden": "forbidden"
+    },
+    "crl": {
+        "initial_refresh_failed": "crl: initial refresh failed: %v, retrying in 5s...",
+        "refresh_failed": "crl: refresh failed: %v",
+        "refreshed": "crl: refreshed from %s (%d revoked entries, next update %s)"
+    },
+    "ocsp": {
+        "fallback_allow": "ocsp: %s (fallback allow)",
+        "fallback_crl": "ocsp: %s (fallback crl)",
+        "fallback_deny": "ocsp: %s (fallback deny)"
+    },
+    "http": {
+        "too_many_requests": "too many connections",
+        "server_busy": "server busy",
+        "mtls_required": "mTLS required",
+        "ocsp_denied": "OCSP: %s",
+        "crl_error": "CRL error: %s",
+        "cert_revoked": "certificate revoked",
+        "cert_expired": "client certificate expired at %s",
+        "no_route": "no route for path",
+        "method_not_allowed": "method not allowed",
+        "forbidden": "forbidden",
+        "cert_conn_limit": "per-certificate connection limit exceeded"
+    },
+    "cert": {
+        "expiry_monitor": "listener %q: client cert expires at %s",
+        "expiry_denied": "client certificate expired at %s"
+    },
+    "ocsp_stapling": {
+        "initial_loaded": "ocsp stapling: initial staple loaded for %q",
+        "refresh_error": "ocsp stapling: refresh failed for %q: %v"
+    },
+    "audit": {
+        "tsa_sign_failed": "audit: tsa sign failed: %v (entry will be unsigned)",
+        "write_failed": "audit: write failed: %v"
+    },
+    "cli": {
+        "no_config": "no config file and no --listener/--route flags",
+        "help_config": "       use --config <path> or --listener/--route for CLI mode",
+        "listener_required": "at least one --listener and --route required in CLI mode"
+    },
+    "err": {
+        "config_not_found": "config file not found at %s",
+        "config_hint": "       specify with --config <path> or use --listener/--route",
+        "load_config": "error: %v",
+        "reload": "reload error: %v"
+    },
+    "api": {
+        "listening": "management API: listening on %s",
+        "load_cert_error": "management: load cert: %v",
+        "tls_config_error": "management: TLS config: %v",
+        "config_persist": "persist config: %v",
+        "method_not_allowed": "method not allowed",
+        "listener_exists": "listener already exists",
+        "listener_not_found": "listener not found",
+        "audit_not_configured": "audit not configured"
+    }
+}
