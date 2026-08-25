@@ -1,52 +1,76 @@
-# Varwof Gateway
+# varwof-gateway
 
-三层零信任安全网关，整合 TCP/HTTP/UDP 协议，提供 mTLS 双向认证和细粒度权限控制。
+> Three-layer zero-trust security gateway — TCP/HTTP/UDP with mTLS mutual authentication + fine-grained RBAC + AIC capability verification.
 
-## 特性
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/varwof/gateway)](https://pkg.go.dev/github.com/varwof/gateway)
 
-- **TCP 网关 (L4)**：透明代理 + mTLS
-- **HTTP 网关 (L7)**：反向代理 + 路径级 RBAC
-- **UDP 网关 (L3)**：DTLS/QUIC + 限速
-- CRL/OCSP 实时吊销检查
-- AIC 能力验证
-- 结构化日志 (slog)
-- Prometheus 指标
+[中文](README_CN.md)
 
-## 安装
+## What is varwof-gateway?
+
+Three-layer zero-trust security gateway integrating TCP/HTTP/UDP protocols with mTLS mutual authentication and fine-grained access control.
+
+## Quick Start
 
 ```bash
-go get github.com/varwof/gateway
-```
+go build -o gateway .
 
-## 配置
-
-```json
+cat > config.json <<EOF
 {
-  "listeners": [
-    {
-      "name": "https",
-      "listen": ":443",
-      "protocol": "http2",
-      "tls": {
-        "mode": "mtls",
-        "cert_file": "server.pem",
-        "key_file": "server-key.pem",
-        "ca_cert_file": "ca.pem"
-      },
-      "routes": [
-        { "path": "/", "target": "http://127.0.0.1:8080" }
-      ]
-    }
-  ]
+  "listeners": [{
+    "name": "https",
+    "listen": ":443",
+    "protocol": "http2",
+    "tls": {
+      "mode": "mtls",
+      "cert_file": "server.pem",
+      "key_file": "server-key.pem",
+      "ca_cert_file": "ca.pem"
+    },
+    "routes": [
+      { "path": "/", "target": "http://127.0.0.1:8080" }
+    ]
+  }]
 }
-```
+EOF
 
-## 运行
-
-```bash
 gateway --config config.json
 ```
 
-## 许可证
+## Installation
 
-Apache-2.0
+```bash
+go build -o gateway .
+```
+
+## Features
+
+| Layer | Protocol | Capabilities |
+|-------|----------|-------------|
+| **L4** | TCP | Transparent proxy + mTLS |
+| **L7** | HTTP | Reverse proxy + path-level RBAC |
+| **L3** | UDP | DTLS/QUIC + rate limiting |
+
+Common: CRL/OCSP real-time revocation, AIC capability verification, structured logging (slog), Prometheus metrics, hot reload (SIGHUP), management API.
+
+## Ecosystem
+
+```mermaid
+graph LR
+    client["User / AI Agent"] -->|mTLS| gw["gateway<br/>TCP/HTTP/UDP"]
+    gw -->|mTLS| core["core<br/>PKI CA"]
+    gw --> gwcore["gateway-core<br/>Security Engine"]
+```
+
+gateway is the **frontend access layer** of the varwof ecosystem. This project is a member of the [Open Invention Network](https://openinventionnetwork.com/).
+
+## Links
+
+| | |
+|---|---|
+| Homepage | https://varwof.com |
+| Community | https://varwof.org |
+| IETF Draft | [draft-wei-aic-identity-cert](https://datatracker.ietf.org/doc/draft-wei-aic-identity-cert/) |
+| License | Apache-2.0 |
+| Member | [Open Invention Network](https://openinventionnetwork.com/) |
