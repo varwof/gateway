@@ -2,6 +2,8 @@
 
 > Three-layer zero-trust security gateway — TCP/HTTP/UDP with mTLS mutual authentication + fine-grained RBAC + AIC capability verification.
 
+> ⚠️ **Preview** — Not for production use. APIs and features may change before official release.
+
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/varwof/gateway)](https://pkg.go.dev/github.com/varwof/gateway)
 

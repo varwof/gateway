@@ -5,6 +5,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/varwof/gateway)](https://pkg.go.dev/github.com/varwof/gateway)
 
+> ⚠️ **预览版** — 不可用于生产环境。API 和功能可能在正式发布前发生变更。
+
 [English](README.md)
 
 ## 什么是 varwof-gateway？
