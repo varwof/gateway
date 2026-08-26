@@ -5,6 +5,7 @@ package udpgw
 
 import (
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -350,6 +351,41 @@ func TestUDPProxyHandlePacket(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if p.ActiveClients() != 0 {
 		t.Logf("ActiveClients() = %d (expected eventually 0, may still be running)", p.ActiveClients())
+	}
+}
+
+func TestUDPProxyConcurrentPacketsSameSourceDoNotPanic(t *testing.T) {
+	p := &UDPProxy{
+		cfg: ListenerConfig{
+			Name:          "same-source",
+			MaxPacketSize: 1500,
+			Routes:        []RouteConfig{},
+		},
+		rateLimit:   make(map[string]*rateBucket),
+		certTracker: gw.NewConnectionTracker(),
+		bundle:      NewBundle(),
+	}
+	src := &net.UDPAddr{IP: net.ParseIP("10.0.0.1"), Port: 12345}
+
+	const workers = 64
+	const packetsPerWorker = 32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < packetsPerWorker; j++ {
+				p.handlePacket(src, []byte("test"), true)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := p.ActiveClients(); got != 0 {
+		t.Fatalf("ActiveClients() = %d after all packets returned, want 0", got)
 	}
 }
 

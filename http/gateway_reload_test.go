@@ -128,6 +128,11 @@ func TestGatewayReloadStartError(t *testing.T) {
 	if err := g.Reload(); err == nil || !strings.Contains(err.Error(), "start listener") {
 		t.Fatalf("expected start listener error, got %v", err)
 	}
+
+	// A failed start closes the replacement lifecycle channel. Shutdown must
+	// remain safe and idempotent after that partial reload.
+	g.Stop()
+	g.Stop()
 }
 
 func TestGatewayReloadCRLLoadError(t *testing.T) {

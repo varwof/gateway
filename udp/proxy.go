@@ -210,12 +210,52 @@ func (p *UDPProxy) ActiveClients() int {
 }
 
 func (p *UDPProxy) activeClientCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	n := 0
 	p.clients.Range(func(_, _ interface{}) bool {
 		n++
 		return true
 	})
 	return n
+}
+
+func (p *UDPProxy) beginClientPacket(key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	count := int32(0)
+	if value, ok := p.clients.Load(key); ok {
+		if current, typeOK := value.(int32); typeOK {
+			count = current
+		} else {
+			// The map is private, but treat unexpected state as absent instead
+			// of allowing packet processing to panic on a type assertion.
+			p.clients.Delete(key)
+		}
+	}
+	p.clients.Store(key, count+1)
+}
+
+func (p *UDPProxy) endClientPacket(key string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	value, ok := p.clients.Load(key)
+	if !ok {
+		return
+	}
+	count, ok := value.(int32)
+	if !ok {
+		p.clients.Delete(key)
+		return
+	}
+	if count <= 1 {
+		p.clients.Delete(key)
+		return
+	}
+	p.clients.Store(key, count-1)
 }
 
 func (p *UDPProxy) serve() {
@@ -360,21 +400,8 @@ func (p *UDPProxy) handlePacket(src *net.UDPAddr, data []byte, allowed bool) {
 	start := time.Now()
 	// M3: count distinct active clients by IP, not in-flight packets.
 	key := src.String()
-	val, _ := p.clients.LoadOrStore(key, int32(0))
-	cur, _ := val.(int32)
-	p.clients.Store(key, cur+1)
-	defer func() {
-		v, _ := p.clients.Load(key)
-		if v == nil {
-			return
-		}
-		cur, _ := v.(int32)
-		if cur <= 1 {
-			p.clients.Delete(key)
-		} else {
-			p.clients.Store(key, cur-1)
-		}
-	}()
+	p.beginClientPacket(key)
+	defer p.endClientPacket(key)
 	ActiveClients.Set(int64(p.activeClientCount()), p.cfg.Name)
 
 	target := p.selectTarget(src.String())
