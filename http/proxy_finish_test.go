@@ -160,7 +160,6 @@ func TestProxyHandleRequestDelegatedAgentGSFull(t *testing.T) {
 	tru := true
 	cert := makeExtCert(t, "agent-1", []string{"Delegated-Agent"}, []string{"Acme"}, []pkix.Extension{
 		{Id: pki.OIDAIC, Value: marshalTestAIC(t)},
-		{Id: pki.OIDGatewaySession, Value: marshalTestGS(t, 1)},
 	})
 
 	p := newDirectProxy(t, ListenerConfig{
@@ -202,7 +201,6 @@ func TestProxyHandleRequestDelegatedAgentGSFull(t *testing.T) {
 			"X-Client-Cert-Serial",
 			"X-Client-Cert-Principal",
 			"X-Client-Cert-Agent-ID",
-			"X-Agent-TTL",
 			"X-Forwarded-Client-CN",
 			"X-Forwarded-Client-O",
 			"X-Forwarded-Client-OU",
@@ -229,11 +227,9 @@ func TestProxyHandleRequestDelegatedAgentGSFull(t *testing.T) {
 		if !strings.Contains(req.Header.Get("X-AIC-Capabilities"), "gateway:read") {
 			t.Errorf("X-AIC-Capabilities = %q, want gateway:read", req.Header.Get("X-AIC-Capabilities"))
 		}
-		if req.Header.Get("X-GS-Max-Concurrent") != "5" {
-			t.Errorf("X-GS-Max-Concurrent = %q, want 5", req.Header.Get("X-GS-Max-Concurrent"))
-		}
-		if req.Header.Get("X-GS-Hard-Timeout") != "1" {
-			t.Errorf("X-GS-Hard-Timeout = %q, want 1", req.Header.Get("X-GS-Hard-Timeout"))
+		// X-Agent-TTL and X-GS-* headers are no longer injected (GS removed).
+		if req.Header.Get("X-Agent-TTL") != "" {
+			t.Errorf("X-Agent-TTL should not be set without GS extension, got %q", req.Header.Get("X-Agent-TTL"))
 		}
 		if !strings.Contains(req.Header.Get("X-AIC-Verified-By"), "1.2.840.10045") {
 			t.Errorf("X-AIC-Verified-By = %q, want ECDSA algorithm OID", req.Header.Get("X-AIC-Verified-By"))

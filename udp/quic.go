@@ -283,7 +283,7 @@ func (q *QUICProxy) handleConnection(conn quic.Connection) {
 		}
 
 		// Delegated-Agent check
-		if reason := gw.CheckDelegatedAgentCert(clientCert, result.GatewaySession); reason != "" {
+		if reason := gw.CheckDelegatedAgentCert(clientCert); reason != "" {
 			if q.audit != nil {
 				entry := gw.NewAuditEntryDenied(conn.RemoteAddr().String(), q.cfg.Name, "", reason, clientCert)
 				q.audit.Log(entry)
@@ -293,58 +293,23 @@ func (q *QUICProxy) handleConnection(conn quic.Connection) {
 
 		certSerial = result.Serial
 
-		// P4.2: GatewaySession enforcement
-		if result.GatewaySession != nil {
-			remoteAddr := conn.RemoteAddr().String()
-			if len(result.GatewaySession.AllowedCIDRs) > 0 {
-				host, _, _ := net.SplitHostPort(remoteAddr)
-				allowed := false
-				for _, cidr := range result.GatewaySession.AllowedCIDRs {
-					_, cidrNet, err := net.ParseCIDR(cidr)
-					if err != nil {
-						continue
-					}
-					ip := net.ParseIP(host)
-					if ip != nil && cidrNet.Contains(ip) {
-						allowed = true
-						break
-					}
-				}
-				if !allowed {
-					q.logger.Warn("session CIDR not allowed",
-						"name", q.cfg.Name, "remote", remoteAddr, "client", clientCert.Subject.CommonName)
-					conn.CloseWithError(0, "session CIDR not allowed")
-					return
-				}
+		// Connection registry tracking
+		remoteAddr := conn.RemoteAddr().String()
+		if q.connRegistry != nil {
+			aic, _ := gw.ParseAIC(clientCert)
+			agentId := ""
+			principalUid := ""
+			if aic != nil {
+				agentId = aic.AgentId
+				principalUid = aic.PrincipalUid.String()
 			}
-			if result.GatewaySession.HardTimeoutLimit() > 0 {
-				go func() {
-					timer := time.NewTimer(time.Duration(result.GatewaySession.HardTimeoutLimit()) * time.Second)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						conn.CloseWithError(0, "session timeout")
-					case <-conn.Context().Done():
-					case <-q.stopCh:
-					}
-				}()
-			}
-			if q.connRegistry != nil {
-				aic, _ := gw.ParseAIC(clientCert)
-				agentId := ""
-				principalUid := ""
-				if aic != nil {
-					agentId = aic.AgentId
-					principalUid = aic.PrincipalUid.String()
-				}
-				remove := q.connRegistry.RegisterConn(agentId, principalUid, remoteAddr, "quic", gw.NormalizeSerial(clientCert.SerialNumber), func() {
-					conn.CloseWithError(0, "disconnected by admin")
-				})
-				go func() {
-					<-q.stopCh
-					remove()
-				}()
-			}
+			remove := q.connRegistry.RegisterConn(agentId, principalUid, remoteAddr, "quic", gw.NormalizeSerial(clientCert.SerialNumber), func() {
+				conn.CloseWithError(0, "disconnected by admin")
+			})
+			go func() {
+				<-q.stopCh
+				remove()
+			}()
 		}
 	}
 

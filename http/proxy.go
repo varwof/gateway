@@ -523,7 +523,7 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 		// longer injected. X-Agent-TTL is only injected with session expiry when certificate
 		// passthrough is enabled.
 		if gw.HasDelegatedAgentOU(clientCert) {
-			_, expiry, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal, result.GatewaySession)
+			_, expiry, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal)
 			if reason != "" {
 				p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
 					reason, clientCert))
@@ -613,30 +613,6 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 				// by the renewal flag.
 				p.revoker.RevokeClientCertForced(clientCert, p.audit)
 				p.taskRegistry.Unregister(taskID)
-			}
-		}
-		// P4.2: GatewaySession enforcement (AllowedCIDRs + HardTimeout)
-		if gs := result.GatewaySession; gs != nil {
-			remoteHost, _, _ := net.SplitHostPort(r.RemoteAddr)
-			if len(gs.AllowedCIDRs) > 0 && !gs.CIDRAllowed(remoteHost) {
-				p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
-					"session CIDR not allowed", clientCert))
-				writeProxyError(w, http.StatusForbidden, "http.access_denied",
-					p.bundle.T(p.lang, "http.access_denied"))
-				return
-			}
-			if gs.HardTimeoutLimit() > 0 {
-				reqCtx, cancel := context.WithCancel(r.Context())
-				r = r.WithContext(reqCtx)
-				go func() {
-					timer := time.NewTimer(time.Duration(gs.HardTimeoutLimit()) * time.Second)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						cancel()
-					case <-reqCtx.Done():
-					}
-				}()
 			}
 		}
 	}
@@ -744,10 +720,6 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 			if aic.DelegationAuthorization.Timestamp.Unix() > 0 {
 				r.Header.Set("X-AIC-Verified-By", aic.DelegationAuthorization.SignatureAlgorithm.Algorithm.String())
 			}
-		}
-		if result != nil && result.GatewaySession != nil {
-			r.Header.Set("X-GS-Max-Concurrent", fmt.Sprintf("%d", result.GatewaySession.MaxConcurrent))
-			r.Header.Set("X-GS-Hard-Timeout", fmt.Sprintf("%d", result.GatewaySession.HardTimeout))
 		}
 	}
 

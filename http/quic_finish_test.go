@@ -48,16 +48,6 @@ func marshalTestAIC(t *testing.T) []byte {
 	return val
 }
 
-func marshalTestGS(t *testing.T, hardTimeout int) []byte {
-	t.Helper()
-	gs := pki.GatewaySessionExtension{Version: 1, MaxConcurrent: 5, HardTimeout: hardTimeout, MaxRetries: 2}
-	val, err := asn1.Marshal(gs)
-	if err != nil {
-		t.Fatalf("marshal GS: %v", err)
-	}
-	return val
-}
-
 func makeExtCert(t *testing.T, cn string, ous []string, org []string, exts []pkix.Extension) *x509.Certificate {
 	t.Helper()
 	key := genKey(t)
@@ -106,7 +96,6 @@ func TestQUICProxyH3RequestFullHeaders(t *testing.T) {
 	tru := true
 	cert := makeExtCert(t, "agent-1", []string{"Delegated-Agent"}, []string{"Acme"}, []pkix.Extension{
 		{Id: pki.OIDAIC, Value: marshalTestAIC(t)},
-		{Id: pki.OIDGatewaySession, Value: marshalTestGS(t, 1)},
 	})
 
 	q := newTestQUIC(ListenerConfig{
@@ -146,7 +135,6 @@ func TestQUICProxyH3RequestFullHeaders(t *testing.T) {
 		"x-client-cert-cn: agent-1",
 		"x-client-cert-principal: varwof:user@varwof.com:",
 		"x-client-cert-agent-id: agent-h3",
-		"x-agent-ttl: ",
 		"x-forwarded-client-cn: agent-1",
 		"x-forwarded-client-o: acme",
 		"x-forwarded-client-ou: delegated-agent",
@@ -155,20 +143,24 @@ func TestQUICProxyH3RequestFullHeaders(t *testing.T) {
 		"x-aic-agent-id: agent-h3",
 		"x-aic-principal-uid: varwof:user@varwof.com:",
 		"x-aic-capabilities: gateway:read",
-		"x-gs-max-concurrent: 5",
-		"x-gs-hard-timeout: 1",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing header %q in backend echo:\n%s", want, body)
 		}
 	}
 
-	// Second request: let the 1s hard-timeout timer fire (covers timer.C cancel).
+	// X-Agent-TTL and X-GS-* headers are no longer injected (GS removed).
+	if strings.Contains(body, "x-agent-ttl:") {
+		t.Errorf("x-agent-ttl should not be set without GS extension")
+	}
+	if strings.Contains(body, "x-gs-") {
+		t.Errorf("x-gs-* headers should not be set (GS removed)")
+	}
+
 	rr2 := run(false)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("code = %d, want 200", rr2.Code)
 	}
-	time.Sleep(1300 * time.Millisecond)
 }
 
 func TestQUICProxyH3RequestBackendUnreachable(t *testing.T) {
@@ -229,7 +221,7 @@ func tunnelClientCertExt(t *testing.T, caCert *x509.Certificate, caKey *rsa.Priv
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: cert}
 }
 
-func TestQUICTunnelGSTimeoutAndDialError(t *testing.T) {
+func TestQUICTunnelNoGSMeansNoTimeout(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -241,9 +233,7 @@ func TestQUICTunnelGSTimeoutAndDialError(t *testing.T) {
 		c.Routes[0].Target = dead
 	})
 
-	client := tunnelClientCertExt(t, fx.caCert, fx.caKey, []string{"gateway:admin"}, []pkix.Extension{
-		{Id: pki.OIDGatewaySession, Value: marshalTestGS(t, 1)},
-	})
+	client := tunnelClientCertExt(t, fx.caCert, fx.caKey, []string{"gateway:admin"}, nil)
 	conn, stream := dialTunnel(t, fx, client)
 	defer conn.CloseWithError(0, "")
 
@@ -253,11 +243,12 @@ func TestQUICTunnelGSTimeoutAndDialError(t *testing.T) {
 	stream.SetReadDeadline(time.Now().Add(3 * time.Second))
 	_, _ = io.Copy(io.Discard, stream)
 
-	time.Sleep(1500 * time.Millisecond)
+	// Without GS, no hard timeout timer; connection should remain open.
+	time.Sleep(500 * time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := conn.OpenStreamSync(ctx); err == nil {
-		t.Fatal("expected connection closed after GS hard timeout")
+	if _, err := conn.OpenStreamSync(ctx); err != nil {
+		t.Fatalf("connection should remain open without GS timeout, got: %v", err)
 	}
 }
 

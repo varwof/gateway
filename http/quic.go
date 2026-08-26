@@ -488,7 +488,7 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 		// via X-Client-Cert-DER; the deprecated X-Agent-User username path
 		// (B1) is no longer injected.
 		if gw.HasDelegatedAgentOU(clientCert) {
-			_, expiry, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal, result.GatewaySession)
+			_, expiry, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal)
 			if reason != "" {
 				http.Error(w, reason, http.StatusForbidden)
 				return
@@ -518,27 +518,6 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// P4.2: GatewaySession enforcement
-		if gs := result.GatewaySession; gs != nil {
-			if len(gs.AllowedCIDRs) > 0 && !gs.CIDRAllowed(clientIP) {
-				http.Error(w, "session CIDR not allowed", http.StatusForbidden)
-				return
-			}
-			if gs.HardTimeoutLimit() > 0 {
-				reqCtx, cancel := context.WithCancel(r.Context())
-				r = r.WithContext(reqCtx)
-				go func() {
-					timer := time.NewTimer(time.Duration(gs.HardTimeoutLimit()) * time.Second)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						cancel()
-					case <-reqCtx.Done():
-					}
-				}()
-			}
-		}
-
 		// Inject X-AIC-* headers matching HTTP proxy behavior
 		if q.cfg.HTTPExt.ForwardClientCertEnabled() {
 			r.Header.Set("X-Forwarded-Client-CN", clientCert.Subject.CommonName)
@@ -564,10 +543,6 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 					}
 					r.Header.Set("X-AIC-Capabilities", strings.Join(caps, ","))
 				}
-			}
-			if result != nil && result.GatewaySession != nil {
-				r.Header.Set("X-GS-Max-Concurrent", fmt.Sprintf("%d", result.GatewaySession.MaxConcurrent))
-				r.Header.Set("X-GS-Hard-Timeout", fmt.Sprintf("%d", result.GatewaySession.HardTimeout))
 			}
 		}
 	}
@@ -819,41 +794,6 @@ func (q *QUICListener) handleConnection(conn quic.Connection) {
 	if !result.Granted {
 		conn.CloseWithError(0, result.DenyReason)
 		return
-	}
-
-	// P4.2: GatewaySession enforcement (AllowedCIDRs + HardTimeout)
-	if gs := result.GatewaySession; gs != nil {
-		remoteHost, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
-		if len(gs.AllowedCIDRs) > 0 {
-			allowed := false
-			for _, cidr := range gs.AllowedCIDRs {
-				_, cidrNet, e := net.ParseCIDR(cidr)
-				if e != nil {
-					continue
-				}
-				ip := net.ParseIP(remoteHost)
-				if ip != nil && cidrNet.Contains(ip) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				conn.CloseWithError(0, "session CIDR not allowed")
-				return
-			}
-		}
-		if gs.HardTimeoutLimit() > 0 {
-			go func() {
-				timer := time.NewTimer(time.Duration(gs.HardTimeoutLimit()) * time.Second)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					conn.CloseWithError(0, "session timeout")
-				case <-conn.Context().Done():
-				case <-q.stopCh:
-				}
-			}()
-		}
 	}
 
 	if q.cfg.TLS.MaxConnsPerIP > 0 {

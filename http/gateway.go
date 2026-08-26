@@ -38,6 +38,8 @@ type Gateway struct {
 	stopCh         chan struct{}
 	RenewalCh      chan struct{}
 	stopGuard      *gw.StopGuard
+	stopChOnce     sync.Once
+	renewalChOnce  sync.Once
 	mgmt           *gw.ManagementServer
 	connRegistry   *gw.ConnRegistry
 	pluginRegistry *gw.PluginRegistry
@@ -332,8 +334,8 @@ func (g *Gateway) Stop() {
 	if g.nonceCache != nil {
 		g.nonceCache.Stop()
 	}
-	close(g.RenewalCh)
-	close(g.stopCh)
+	g.renewalChOnce.Do(func() { close(g.RenewalCh) })
+	g.stopChOnce.Do(func() { close(g.stopCh) })
 
 	if g.mgmt != nil {
 		g.mgmt.Stop()
@@ -546,8 +548,9 @@ func (g *Gateway) Reload() error {
 	}
 
 	// Phase 2: All constructions succeeded, begin tearing down old lifecycle.
-	close(g.stopCh)
+	g.stopChOnce.Do(func() { close(g.stopCh) })
 	g.stopCh = newStopCh
+	g.stopChOnce = sync.Once{} // reset for new channel
 
 	// Restart ConnExpiryRegistry cleanup loop (W04).
 	if g.connExpiryStop != nil {
@@ -561,7 +564,7 @@ func (g *Gateway) Reload() error {
 			pl.old.Stop()
 		}
 		if err := pl.li.Start(); err != nil {
-			close(g.stopCh)
+			g.stopChOnce.Do(func() { close(g.stopCh) })
 			return fmt.Errorf("start listener %q: %w", pl.li.Name(), err)
 		}
 		newListeners[pl.li.Name()] = pl.li

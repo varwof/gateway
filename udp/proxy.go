@@ -361,13 +361,18 @@ func (p *UDPProxy) handlePacket(src *net.UDPAddr, data []byte, allowed bool) {
 	// M3: count distinct active clients by IP, not in-flight packets.
 	key := src.String()
 	val, _ := p.clients.LoadOrStore(key, int32(0))
-	p.clients.Store(key, val.(int32)+1)
+	cur, _ := val.(int32)
+	p.clients.Store(key, cur+1)
 	defer func() {
 		v, _ := p.clients.Load(key)
-		if v.(int32) <= 1 {
+		if v == nil {
+			return
+		}
+		cur, _ := v.(int32)
+		if cur <= 1 {
 			p.clients.Delete(key)
 		} else {
-			p.clients.Store(key, v.(int32)-1)
+			p.clients.Store(key, cur-1)
 		}
 	}()
 	ActiveClients.Set(int64(p.activeClientCount()), p.cfg.Name)
@@ -497,7 +502,7 @@ func (p *UDPProxy) handleDTLSConn(dtlsConn net.Conn) {
 		}
 
 		// Delegated-Agent check
-		if reason := gw.CheckDelegatedAgentCert(clientCert, result.GatewaySession); reason != "" {
+		if reason := gw.CheckDelegatedAgentCert(clientCert); reason != "" {
 			if p.audit != nil {
 				entry := gw.NewAuditEntryDenied(dtlsConn.RemoteAddr().String(), p.cfg.Name, "", reason, clientCert)
 				p.audit.Log(entry)
@@ -523,9 +528,6 @@ func (p *UDPProxy) handleDTLSConn(dtlsConn net.Conn) {
 			defer p.revoker.RevokeClientCert(clientCert, p.audit)
 		}
 		// B03 — DTLS cert expiry monitor.
-		// G2(a): Short-lived certificates (including AIC) enforce "connection duration ≤ remaining certificate lifetime", cannot be
-		// disabled by disconnect_on_expiry (otherwise a 5-minute cert connection could stay open for 5 days);
-		// non-AIC long-lived identity certificates retain original config gating.
 		if gw.HasAIC(clientCert) || p.cfg.DisconnectOnExpiryEnabled() {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -551,60 +553,23 @@ func (p *UDPProxy) handleDTLSConn(dtlsConn net.Conn) {
 			}()
 		}
 
-		// P4.2: GatewaySession enforcement
-		if result.GatewaySession != nil {
-			remoteAddr := dtlsConn.RemoteAddr().String()
-			if len(result.GatewaySession.AllowedCIDRs) > 0 {
-				host, _, _ := net.SplitHostPort(remoteAddr)
-				allowed := false
-				for _, cidr := range result.GatewaySession.AllowedCIDRs {
-					_, cidrNet, e := net.ParseCIDR(cidr)
-					if e != nil {
-						continue
-					}
-					ip := net.ParseIP(host)
-					if ip != nil && cidrNet.Contains(ip) {
-						allowed = true
-						break
-					}
-				}
-				if !allowed {
-					if p.audit != nil && clientCert != nil {
-						entry := gw.NewAuditEntryDenied(remoteAddr, p.cfg.Name, "",
-							"session CIDR not allowed", clientCert)
-						p.audit.Log(entry)
-					}
-					dtlsConn.Close()
-					return
-				}
+		// Connection registry tracking
+		remoteAddr := dtlsConn.RemoteAddr().String()
+		if p.connRegistry != nil && clientCert != nil {
+			aic, _ := gw.ParseAIC(clientCert)
+			agentId := ""
+			principalUid := ""
+			if aic != nil {
+				agentId = aic.AgentId
+				principalUid = aic.PrincipalUid.String()
 			}
-			if result.GatewaySession.HardTimeoutLimit() > 0 {
-				go func() {
-					timer := time.NewTimer(time.Duration(result.GatewaySession.HardTimeoutLimit()) * time.Second)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						dtlsConn.Close()
-					case <-p.stopCh:
-					}
-				}()
-			}
-			if p.connRegistry != nil && clientCert != nil {
-				aic, _ := gw.ParseAIC(clientCert)
-				agentId := ""
-				principalUid := ""
-				if aic != nil {
-					agentId = aic.AgentId
-					principalUid = aic.PrincipalUid.String()
-				}
-				remove := p.connRegistry.RegisterConn(agentId, principalUid, remoteAddr, "dtls", gw.NormalizeSerial(clientCert.SerialNumber), func() {
-					dtlsConn.Close()
-				})
-				go func() {
-					<-p.stopCh
-					remove()
-				}()
-			}
+			remove := p.connRegistry.RegisterConn(agentId, principalUid, remoteAddr, "dtls", gw.NormalizeSerial(clientCert.SerialNumber), func() {
+				dtlsConn.Close()
+			})
+			go func() {
+				<-p.stopCh
+				remove()
+			}()
 		}
 
 		if p.audit != nil {

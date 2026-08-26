@@ -509,30 +509,6 @@ func (m *Mapping) handleConn(incoming net.Conn) {
 		unregister := m.connRegistry.RegisterConn(result.AgentId, result.Principal, srcIP, "tcp", gw.NormalizeSerial(clientCert.SerialNumber), func() { conn.Close() })
 		defer unregister()
 
-		// P4.2: GatewaySession enforcement (AllowedCIDRs + HardTimeout)
-		if gs := result.GatewaySession; gs != nil {
-			if len(gs.AllowedCIDRs) > 0 {
-				host, _, _ := net.SplitHostPort(srcIP)
-				if !gs.CIDRAllowed(host) {
-					entry := gw.NewAuditEntryDenied(srcIP, m.cfg.Name, m.cfg.Target,
-						"session CIDR not allowed", clientCert)
-					m.audit.Log(entry)
-					return
-				}
-			}
-			if gs.HardTimeoutLimit() > 0 {
-				go func() {
-					timer := time.NewTimer(time.Duration(gs.HardTimeoutLimit()) * time.Second)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						conn.Close()
-					case <-ctx.Done():
-					}
-				}()
-			}
-		}
-
 		// P0-2: disconnect on cert expiry.
 		// G2(a): Short-lived certs (including AIC) enforce "connection duration ≤ certificate remaining validity",
 		// cannot be disabled by disconnect_on_expiry=false (otherwise a 5-minute cert's connection could stay open 5 days);

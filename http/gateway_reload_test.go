@@ -49,7 +49,13 @@ func TestGatewayReloadReuseAndReplace(t *testing.T) {
 		t.Fatal("unchanged listener was not reused")
 	}
 
-	writeConfigFile(t, cfgPath, "127.0.0.2:0")
+	// Write a config with a different route path to trigger listener replacement.
+	backend2, close2 := startTestBackend(t)
+	t.Cleanup(close2)
+	data := fmt.Sprintf(`{"listeners":[{"name":"g1","listen":"127.0.0.1:0","protocol":"http2","routes":[{"path":"/v2/*","target":"%s"}]}]}`, backend2)
+	if err := os.WriteFile(cfgPath, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := g.Reload(); err != nil {
 		t.Fatalf("reload changed: %v", err)
 	}
