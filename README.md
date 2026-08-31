@@ -67,6 +67,14 @@ graph LR
 
 gateway is the **frontend access layer** of the varwof ecosystem. This project is a member of the [Open Invention Network](https://openinventionnetwork.com/).
 
+## Contributing
+
+Code contributions are welcome and go through pull requests. This
+repository is Apache-2.0, so contributions require a DCO sign-off (a
+`Signed-off-by` line in the commit message, e.g. `git commit -s`). See
+the [org-wide CONTRIBUTING](https://github.com/varwof/.github/blob/main/CONTRIBUTING.md)
+for details.
+
 ## Links
 
 | | |

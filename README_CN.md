@@ -50,6 +50,10 @@ go build -o gateway .
 
 gateway 是 varwof 生态的**前端接入层**。本项目是 [Open Invention Network](https://openinventionnetwork.com/) 成员。
 
+## 贡献
+
+欢迎通过 Pull Request 贡献代码。本仓库为 Apache-2.0 许可，代码贡献需 DCO 签署（提交信息中包含 `Signed-off-by` 行，例如 `git commit -s`）。详见[组织级贡献指南](https://github.com/varwof/.github/blob/main/CONTRIBUTING.md)。
+
 ## 链接
 
 | | |
