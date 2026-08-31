@@ -106,6 +106,9 @@ type ProxyListener struct {
 	riskMonitor *gw.RiskMonitor
 	// connRegistry is the connection registry (monitoring presentation + risk disconnect linkage, shared with Gateway).
 	connRegistry *gw.ConnRegistry
+	// jwtVerifier verifies AIC-JWT bearer tokens (HTTP only). nil disables
+	// bearer authentication. Built from cfg.TLS.JWTCAFile.
+	jwtVerifier *gw.JWTVerifier
 }
 
 // NewProxyListener creates an HTTP proxy listener instance.
@@ -145,6 +148,13 @@ func NewProxyListener(cfg ListenerConfig, crlCache *gw.CRLCache, ocspCache *gw.O
 	}
 	if crlCache != nil {
 		p.crlCache.Store(crlCache)
+	}
+	if cfg.TLS != nil && cfg.TLS.JWTCAFile != "" {
+		verifier, err := gw.LoadJWTVerifier(cfg.TLS.JWTCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("load jwt CA %q: %w", cfg.TLS.JWTCAFile, err)
+		}
+		p.jwtVerifier = verifier
 	}
 	p.state.Store(ProxyStopped)
 
@@ -450,13 +460,47 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 	var clientCert *x509.Certificate
 	var result *gw.PipelineResult
 	var matchedRoute *Route
-	if p.cfg.effectiveMode() == gw.TLSModeMTLS {
-		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-			writeProxyError(w, http.StatusUnauthorized, "http.mtls_required",
-				p.bundle.T(p.lang, "http.mtls_required"))
-			return
+	mode := p.cfg.effectiveMode()
+	var chain []*x509.Certificate
+	if r.TLS != nil {
+		chain = r.TLS.PeerCertificates
+	}
+	if chain == nil {
+		chain = []*x509.Certificate{}
+	}
+	if mode == gw.TLSModeMTLS || p.jwtVerifier != nil {
+		// HTTP bearer AIC-JWT fallback: when the transport presents no mTLS
+		// client certificate (server/none TLS modes, or an mtls listener that
+		// skipped client auth) a valid Authorization: Bearer <AIC-JWT> is
+		// accepted. The verified token is synthesized into an X.509 carrier so
+		// the rest of the pipeline (CRL/OCSP/RBAC/AIC/plugins, header
+		// injection, audit, conn registry) reuses the certificate path
+		// unchanged. mTLS, when a certificate is presented, always takes
+		// precedence over a bearer token.
+		if len(chain) == 0 {
+			if tok := bearerToken(r); tok != "" && p.jwtVerifier != nil {
+				cert, _, err := p.jwtVerifier.VerifyBearer(tok, time.Now())
+				if err != nil {
+					p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
+						"bearer_token_invalid: "+err.Error(), nil))
+					writeProxyError(w, http.StatusUnauthorized, "http.bearer_invalid",
+						p.bundle.T(p.lang, "http.bearer_invalid"))
+					return
+				}
+				clientCert = cert
+				chain = []*x509.Certificate{cert}
+			} else if mode == gw.TLSModeMTLS {
+				writeProxyError(w, http.StatusUnauthorized, "http.mtls_required",
+					p.bundle.T(p.lang, "http.mtls_required"))
+				return
+			}
 		}
-		clientCert = r.TLS.PeerCertificates[0]
+		if clientCert == nil && len(chain) > 0 {
+			clientCert = chain[0]
+		}
+	}
+
+	if mode == gw.TLSModeMTLS || clientCert != nil {
 
 		// Determine RequiredCapabilities from matched route (early match for pipeline)
 		var requiredCaps []string
@@ -481,7 +525,6 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Unified admission pipeline: CRL -> OCSP -> RBAC -> AIC/GS -> Plugins
-		chain := r.TLS.PeerCertificates
 		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 		result = gw.RunAccessPipeline(chain, &gw.PipelineConfig{
 			CRLCache:                 p.crlCache.Load(),
@@ -962,6 +1005,20 @@ func writeProxyError(w http.ResponseWriter, status int, key, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(errorResponse{Error: key, Message: message})
+}
+
+// bearerToken returns the AIC-JWT from an Authorization: Bearer header, or
+// "" when the header is absent/malformed.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if len(h) < 7 || !strings.EqualFold(h[:7], "Bearer ") {
+		return ""
+	}
+	tok := strings.TrimSpace(h[7:])
+	if tok == "" || strings.ContainsAny(tok, "\r\n") {
+		return ""
+	}
+	return tok
 }
 
 // closeResponseWriterConn force-closes the client connection (used for risk disconnect).

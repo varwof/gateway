@@ -36,7 +36,8 @@
         "no_route": "no route for path",
         "method_not_allowed": "method not allowed",
         "forbidden": "forbidden",
-        "cert_conn_limit": "per-certificate connection limit exceeded"
+        "cert_conn_limit": "per-certificate connection limit exceeded",
+        "bearer_invalid": "invalid bearer token"
     },
     "cert": {
         "expiry_monitor": "listener %q: client cert expires at %s",

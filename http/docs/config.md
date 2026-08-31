@@ -129,6 +129,7 @@
 |------|------|--------|------|
 | `mode` | string | — | TLS 认证模式：`none` / `server` / `mtls`。`protocol=h3/quic` 时缺省由 `ca_cert_file` 是否存在推导（有→`mtls`，无→`server`），其余协议缺省为 `none` |
 | `ca_cert_file` | string | 必填(mtls) | CA 证书路径 |
+| `jwt_ca_file` | string | — | **可选**。AIC-JWT Bearer 信任根 CA 证书路径（HTTP 专用）。设置后，未携带 mTLS 客户端证书的请求可用 `Authorization: Bearer <AIC-JWT>` 认证；mTLS 证书优先。留空禁用 Bearer 认证。kid 约定与 X.509 载体一致（`base64url(SHA-256(SPKI))`），与 core `/.well-known/jwks.json` 绑定相同 |
 | `cert_file` | string | — | 服务端证书 |
 | `key_file` | string | — | 服务端私钥 |
 | `crl_url` | string | — | CRL 分发点 URL |
