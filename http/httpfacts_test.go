@@ -11,7 +11,7 @@ import (
 func TestHTTPFactsFor(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/tables/customers/rows?tenant=org-a", nil)
 	r.Header.Set("X-Role", "readonly")
-	f := httpFactsFor(r)
+	f := httpFactsFor(r, nil)
 	if f.Method != "GET" || f.Path != "/api/tables/customers/rows" {
 		t.Fatalf("method/path wrong: %+v", f)
 	}

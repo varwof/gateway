@@ -5,6 +5,7 @@ package httpgw
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -14,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -568,6 +570,13 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 
 		// Unified admission pipeline: CRL -> OCSP -> RBAC -> AIC/GS -> Plugins
 		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		// Read a bounded copy of the request body so capability plugins can
+		// evaluate the operation payload; the body is restored before proxying.
+		var opBody []byte
+		if r.Body != nil {
+			opBody, _ = io.ReadAll(io.LimitReader(r.Body, maxPluginBody))
+			r.Body = io.NopCloser(bytes.NewReader(opBody))
+		}
 		result = gw.RunAccessPipeline(chain, &gw.PipelineConfig{
 			CRLCache:                 p.crlCache.Load(),
 			OCSPCache:                p.ocspCache,
@@ -580,7 +589,7 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 			DisallowRepresentative:   p.cfg.TLS.DisallowRepresentativeEnabled(),
 			RequireUserAuth:          p.cfg.TLS.RequireUserAuthEnabled(),
 			ClientIP:                 clientIP,
-			HTTPFacts:                httpFactsFor(r),
+			HTTPFacts:                httpFactsFor(r, opBody),
 			EnforceConstraints:       true,
 			StrictConstraints:        true,
 			CapabilityPluginRegistry: p.pluginRegistry,
