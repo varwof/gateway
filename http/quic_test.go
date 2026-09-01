@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	gw "github.com/varwof/gateway-core"
@@ -212,6 +213,68 @@ func TestQUICProxyH3RequestBackend(t *testing.T) {
 	q.handleH3Request(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("code = %d, body = %s, want 200", rr.Code, rr.Body.String())
+	}
+}
+
+// TestQUICProxyH3UpstreamRedirectNotFollowed verifies finding 7: the QUIC/H3
+// backend client must never follow an upstream redirect, otherwise a
+// compromised backend could steer the gateway into issuing follow-up requests
+// to internal addresses (SSRF). The 3xx response must be passed through.
+func TestQUICProxyH3UpstreamRedirectNotFollowed(t *testing.T) {
+	canaryHit := atomic.Bool{}
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect-me" {
+			http.Redirect(w, r, "http://127.0.0.1:9/canary", http.StatusFound)
+			return
+		}
+		canaryHit.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer redirector.Close()
+
+	q := newTestQUIC(ListenerConfig{
+		Name: "h3", Protocol: ProtocolH3, TLS: &gw.TLSConfig{},
+		Routes: []RouteConfig{{Path: "/redirect-me", Target: redirector.Listener.Addr().String()}},
+	})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "http://x/redirect-me", nil)
+	q.handleH3Request(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("code = %d, want 302 passed through", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc == "" {
+		t.Fatal("Location header not passed through")
+	}
+	if canaryHit.Load() {
+		t.Fatal("gateway followed the upstream redirect (SSRF); 3xx must be returned to the client")
+	}
+}
+
+// TestQUICProxyH3RequestBodyLimited verifies finding 8: an over-limit request
+// body must be rejected rather than streamed through to the backend.
+func TestQUICProxyH3RequestBodyLimited(t *testing.T) {
+	received := atomic.Int64{}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		received.Store(n)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	q := newTestQUIC(ListenerConfig{
+		Name: "h3", Protocol: ProtocolH3, TLS: &gw.TLSConfig{},
+		Routes: []RouteConfig{{Path: "/upload", Target: backend.Listener.Addr().String()}},
+	})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "http://x/upload", strings.NewReader(strings.Repeat("a", int(h3MaxRequestBodyBytes)+1024)))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	q.handleH3Request(rr, req)
+
+	if got := received.Load(); got > h3MaxRequestBodyBytes {
+		t.Fatalf("backend received %d bytes, want <= %d", got, h3MaxRequestBodyBytes)
+	}
+	if rr.Code != http.StatusBadGateway && rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 or 502", rr.Code)
 	}
 }
 

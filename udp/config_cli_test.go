@@ -5,8 +5,6 @@ package udpgw
 
 import (
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -237,19 +235,16 @@ func TestConfigSaveNoPath(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatalf("Save(): %v", err)
 	}
-	// M30: fallback file now uses random suffix for uniqueness.
-	matches, err := filepath.Glob("/tmp/gateway-udp-" + strconv.Itoa(os.Getpid()) + "-*.json")
-	if err != nil {
-		t.Fatalf("glob: %v", err)
+	// Finding 14: os.CreateTemp generates a high-entropy name (no predictable
+	// /tmp path that a local attacker could enumerate/symlink) and opens with
+	// O_CREATE|O_EXCL. The saved file must exist and be readable.
+	if cfg.configPath == "" {
+		t.Fatal("configPath should be set after Save")
 	}
-	defer func() {
-		for _, m := range matches {
-			os.Remove(m)
-		}
-	}()
-	if len(matches) == 0 {
-		t.Fatal("expected config file matching /tmp/gateway-udp-<pid>-*.json")
+	if _, err := os.Stat(cfg.configPath); err != nil {
+		t.Fatalf("saved config missing: %v", err)
 	}
+	os.Remove(cfg.configPath)
 }
 
 func TestVersionString(t *testing.T) {

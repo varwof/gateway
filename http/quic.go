@@ -24,6 +24,16 @@ import (
 	gw "github.com/varwof/gateway-core"
 )
 
+// h3MaxRequestBodyBytes bounds the request body accepted on the HTTP/3 data
+// plane (finding 8): without a size cap a client could stream an unbounded
+// upload through the gateway to a backend.
+const h3MaxRequestBodyBytes = 1 << 20 // 1 MiB
+
+// h3MaxResponseBodyBytes bounds the response body copied back from an upstream
+// backend (finding 8): a backend could otherwise stream an unbounded (or
+// decompression-bomb) response to every proxied client.
+const h3MaxResponseBodyBytes = 1 << 30 // 1 GiB
+
 // QUICListener is the HTTP/3 QUIC listener instance.
 type QUICListener struct {
 	cfg       ListenerConfig
@@ -59,6 +69,9 @@ type QUICListener struct {
 	// connIPs tracks per-IP connection counts by QUIC connection (updated on ConnContext establish/close).
 	connIPs map[string]int64
 	conns   int64
+	// connTotal tracks live QUIC connections (finding 10: max_total_conns is
+	// enforced against this connection count, not the per-request conns).
+	connTotal int64
 	// policyVersion returns the current effective policy version number (Task 5a).
 	policyVersion func() uint64
 	// policyResolver selects the policy version registry by agent identifier (Task 5b: branch control/canary).
@@ -307,11 +320,16 @@ func (q *QUICListener) connContext(ctx context.Context, c quic.Connection) conte
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
+	// Finding 10: count the live QUIC connection so max_total_conns is
+	// enforced against connections, not requests (H3 multiplexes many
+	// requests over one connection).
+	atomic.AddInt64(&q.connTotal, 1)
 	q.ipMu.Lock()
 	q.connIPs[host]++
 	q.ipMu.Unlock()
 	go func() {
 		<-ctx.Done()
+		atomic.AddInt64(&q.connTotal, -1)
 		q.ipMu.Lock()
 		q.connIPs[host]--
 		if q.connIPs[host] <= 0 {
@@ -330,6 +348,12 @@ func (q *QUICListener) handleH3Request(w http.ResponseWriter, r *http.Request) {
 }
 
 func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
+	// Finding 8: cap the request body so a client cannot stream an unbounded
+	// upload through the gateway.
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, h3MaxRequestBodyBytes)
+	}
+
 	// W22/W19: Trusted identity header namespace is only allowed to be injected by the gateway;
 	// any client-submitted values are stripped. Consistent with HTTP proxy handleRequest to
 	// prevent forged identity headers from being passed through for spoofing.
@@ -366,7 +390,10 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 	if q.cfg.TLS != nil {
 		maxTotal = q.cfg.TLS.MaxTotalConns
 	}
-	if maxTotal > 0 && atomic.LoadInt64(&q.conns) > int64(maxTotal) {
+	// Finding 10: enforce max_total_conns against live QUIC connections, not
+	// the per-request counter. H3 multiplexes many requests over a single
+	// connection; counting by request would let one connection bypass the cap.
+	if maxTotal > 0 && atomic.LoadInt64(&q.connTotal) > int64(maxTotal) {
 		writeProxyError(w, http.StatusServiceUnavailable, "http.server_busy",
 			q.bundle.T(q.lang, "http.server_busy"))
 		return
@@ -488,7 +515,7 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 		// via X-Client-Cert-DER; the deprecated X-Agent-User username path
 		// (B1) is no longer injected.
 		if gw.HasDelegatedAgentOU(clientCert) {
-			_, expiry, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal)
+			_, _, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal)
 			if reason != "" {
 				http.Error(w, reason, http.StatusForbidden)
 				return
@@ -504,9 +531,10 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 						r.Header.Set("X-Client-Cert-Agent-ID", aic.AgentId)
 					}
 				}
-				if !expiry.IsZero() {
-					r.Header.Set("X-Agent-TTL", expiry.UTC().Format(time.RFC3339))
-				}
+				// X-Agent-TTL is intentionally not injected here: it would only
+				// reflect the certificate NotAfter (see proxy.go). The header is
+				// reserved for an explicit session expiry, which is no longer
+				// emitted.
 			}
 		}
 
@@ -711,6 +739,13 @@ func (q *QUICListener) proxyToBackend(w http.ResponseWriter, r *http.Request, ro
 	client := &http.Client{
 		Timeout:   30 * time.Second,
 		Transport: tr,
+		// Finding 7: never follow upstream redirects. A compromised or
+		// malicious backend could otherwise steer the gateway into issuing
+		// follow-up requests to internal/metadata addresses (SSRF). Redirect
+		// responses are passed back to the client untouched instead.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 	resp, err := client.Do(outReq)
 	if err != nil {
@@ -727,7 +762,21 @@ func (q *QUICListener) proxyToBackend(w http.ResponseWriter, r *http.Request, ro
 
 	// client.Timeout (30s) bounds the entire exchange including body copy, so a
 	// slow or hung backend cannot block this handler indefinitely.
-	_, _ = io.Copy(w, resp.Body)
+	// Finding 8: also cap the response body size so an upstream cannot stream an
+	// unbounded (or decompression-bomb) response to the proxied client.
+	//
+	// LimitReader(limit+1) lets us detect a body that exceeds the cap: if we
+	// read past h3MaxResponseBodyBytes the upstream response is oversize and we
+	// abort instead of forwarding it whole.
+	if n, err := io.Copy(w, io.LimitReader(resp.Body, h3MaxResponseBodyBytes+1)); err != nil {
+		return
+	} else if n > h3MaxResponseBodyBytes {
+		// Response body exceeded the cap; terminate the exchange.
+		if closer, ok := w.(http.Flusher); ok {
+			closer.Flush()
+		}
+		return
+	}
 }
 
 // --- QUIC tunnel mode: raw stream forwarding ---

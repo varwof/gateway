@@ -4,6 +4,7 @@
 package udpgw
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -129,6 +130,112 @@ func TestUDPProxyRateLimitingDisabled(t *testing.T) {
 		if !p.trackClient(src) {
 			t.Error("rate limiting should be disabled when MaxPktsPerIP is 0")
 		}
+	}
+}
+
+// TestUDPProxyRateLimitMapBounded (finding 2): a spoofed-source flood cannot
+// grow the rateLimit map without bound; expired buckets are evicted and a
+// full map fails closed instead of growing.
+func TestUDPProxyRateLimitMapBounded(t *testing.T) {
+	p := &UDPProxy{
+		cfg:       ListenerConfig{UDPExt: &gw.UDPExtra{MaxPktsPerIP: 1}},
+		rateLimit: make(map[string]*rateBucket),
+	}
+	// Simulate a near-full map.
+	for i := 0; i < maxRateLimitEntries; i++ {
+		p.rateLimit[fmt.Sprintf("10.0.0.%d", i%250)+fmt.Sprintf(":%d", 1000+i)] = &rateBucket{count: 0, resetAt: time.Now().Add(time.Hour)}
+	}
+	// A fresh source with the map full and nothing expired fails closed.
+	src := &net.UDPAddr{IP: net.ParseIP("192.168.1.1"), Port: 1}
+	if p.trackClient(src) {
+		t.Fatal("full rate-limit map must fail closed (finding 2)")
+	}
+	if len(p.rateLimit) > maxRateLimitEntries {
+		t.Fatalf("rateLimit map grew to %d, want <= %d (finding 2)", len(p.rateLimit), maxRateLimitEntries)
+	}
+
+	// Expired buckets are evicted so legitimate new sources are served again.
+	p2 := &UDPProxy{
+		cfg:       ListenerConfig{UDPExt: &gw.UDPExtra{MaxPktsPerIP: 1}},
+		rateLimit: make(map[string]*rateBucket),
+	}
+	for i := 0; i < maxRateLimitEntries; i++ {
+		p2.rateLimit[fmt.Sprintf("172.16.%d.%d", i/65536, i%65536)] = &rateBucket{count: 0, resetAt: time.Now().Add(-time.Second)}
+	}
+	if !p2.trackClient(src) {
+		t.Fatal("eviction of expired buckets must make room for new sources (finding 2)")
+	}
+	if len(p2.rateLimit) > maxRateLimitEntries {
+		t.Fatalf("rateLimit map grew to %d after eviction, want <= %d (finding 2)", len(p2.rateLimit), maxRateLimitEntries)
+	}
+}
+
+// TestUDPProxyPlaintextDefaultRate (finding 3): a plaintext listener with
+// RequirePlaintextRelayRateLimit applies a default per-IP cap even when
+// max_pkts_per_ip is unset.
+func TestUDPProxyPlaintextDefaultRate(t *testing.T) {
+	on := true
+	p := &UDPProxy{
+		cfg: ListenerConfig{
+			Protocol: ProtocolUDP,
+			UDPExt:   &gw.UDPExtra{RequirePlaintextRelayRateLimit: &on},
+		},
+		rateLimit: make(map[string]*rateBucket),
+	}
+	if !p.plaintextDefaultRateEnabled() {
+		t.Fatal("plaintext listener with RequirePlaintextRelayRateLimit must apply default rate")
+	}
+	src := &net.UDPAddr{IP: net.ParseIP("10.0.0.4"), Port: 1}
+	allowed := 0
+	for i := 0; i < 200; i++ {
+		if p.trackClient(src) {
+			allowed++
+		}
+	}
+	if allowed > plaintextDefaultPktsPerIP {
+		t.Fatalf("plaintext default rate not enforced: allowed %d, want <= %d (finding 3)", allowed, plaintextDefaultPktsPerIP)
+	}
+
+	// Authenticated modes do not get the default cap.
+	p2 := &UDPProxy{
+		cfg:       ListenerConfig{Protocol: ProtocolDTLS, UDPExt: &gw.UDPExtra{RequirePlaintextRelayRateLimit: &on}},
+		rateLimit: make(map[string]*rateBucket),
+	}
+	if p2.plaintextDefaultRateEnabled() {
+		t.Fatal("DTLS must not apply the plaintext default rate")
+	}
+}
+
+// TestUDPProxyResponseAmplified (finding 1): responses disproportionately
+// larger than the request are dropped.
+func TestUDPProxyResponseAmplified(t *testing.T) {
+	p := &UDPProxy{cfg: ListenerConfig{}}
+	// Equal-size response is always fine.
+	if p.responseAmplified(100, 100) {
+		t.Fatal("equal-size response must not be flagged")
+	}
+	// Within the factor (default 16x) is fine.
+	if p.responseAmplified(100, 100*16) {
+		t.Fatal("response at the amplification factor must be allowed")
+	}
+	// Over the factor is dropped.
+	if !p.responseAmplified(100, 100*16+1) {
+		t.Fatal("response over the amplification factor must be dropped (finding 1)")
+	}
+	// Tiny request with the floor: 512-byte floor applies.
+	if p.responseAmplified(16, 512) {
+		t.Fatal("512-byte response to 16-byte request must be allowed (floor)")
+	}
+	if !p.responseAmplified(16, 513) {
+		t.Fatal("response over the floor must be dropped (finding 1)")
+	}
+	// Custom factor.
+	p2 := &UDPProxy{cfg: ListenerConfig{UDPExt: &gw.UDPExtra{MaxAmplification: 4}}}
+	if p2.responseAmplified(100, 400) {
+		t.Fatal("custom factor 4x must allow 400-byte response")
+	}
+	if !p2.responseAmplified(100, 401) {
+		t.Fatal("custom factor 4x must drop 401-byte response (finding 1)")
 	}
 }
 
@@ -332,8 +439,9 @@ func TestUDPProxyHandlePacket(t *testing.T) {
 	certTracker := gw.NewConnectionTracker()
 	p := &UDPProxy{
 		cfg: ListenerConfig{
-			Name:   "test-handle",
-			Routes: []RouteConfig{}, // no routes -> will be dropped
+			Name:     "test-handle",
+			Protocol: ProtocolUDP,     // plaintext: handlePacket response path is valid
+			Routes:   []RouteConfig{}, // no routes -> will be dropped
 		},
 		rateLimit:   make(map[string]*rateBucket),
 		certTracker: certTracker,
@@ -354,10 +462,36 @@ func TestUDPProxyHandlePacket(t *testing.T) {
 	}
 }
 
+// TestUDPProxyHandlePacketAuthModeFailClosed verifies finding 13: the plaintext
+// relay's response path (delivering to the packet-supplied src) must never run
+// in an authenticated mode — responses there must travel over the authenticated
+// DTLS session to the verified peer, never to a caller-supplied address.
+func TestUDPProxyHandlePacketAuthModeFailClosed(t *testing.T) {
+	p := &UDPProxy{
+		cfg: ListenerConfig{
+			Name:     "test-auth-handle",
+			Protocol: ProtocolDTLS,
+			Routes:   []RouteConfig{}, // no routes -> would be dropped if reached
+		},
+		rateLimit:   make(map[string]*rateBucket),
+		certTracker: gw.NewConnectionTracker(),
+		bundle:      NewBundle(),
+	}
+	src := &net.UDPAddr{IP: net.ParseIP("10.0.0.1"), Port: 12345}
+
+	// handlePacket must fail closed (return without relaying) in an
+	// authenticated mode: the caller-supplied src is not trustworthy.
+	p.handlePacket(src, []byte("test"), true)
+	if p.ActiveClients() != 0 {
+		t.Fatalf("ActiveClients() = %d after authenticated-mode handlePacket, want 0 (must fail closed)", p.ActiveClients())
+	}
+}
+
 func TestUDPProxyConcurrentPacketsSameSourceDoNotPanic(t *testing.T) {
 	p := &UDPProxy{
 		cfg: ListenerConfig{
 			Name:          "same-source",
+			Protocol:      ProtocolUDP, // plaintext: handlePacket response path is valid
 			MaxPacketSize: 1500,
 			Routes:        []RouteConfig{},
 		},

@@ -52,6 +52,9 @@ type UDPProxy struct {
 	connRegistry   *gw.ConnRegistry
 	pluginRegistry *gw.PluginRegistry
 	nonceCache     *gw.NonceCache
+	// pktSem bounds concurrent in-flight packet handlers (finding 3): without
+	// it, a flood spawns an unbounded number of goroutines + UDP sockets.
+	pktSem chan struct{}
 	// policyVersion returns the current effective policy version (task 5a).
 	policyVersion func() uint64
 	// policyResolver selects policy version registry by Agent ID (task 5b: branch control/canary).
@@ -64,6 +67,11 @@ type rateBucket struct {
 	count   int64
 	resetAt time.Time
 }
+
+// maxConcurrentPackets bounds the number of in-flight packet handlers per
+// UDP proxy (finding 3). A flood beyond this drops packets instead of
+// spawning unbounded goroutines/sockets.
+const maxConcurrentPackets = 1024
 
 // NewUDPProxy creates a UDP plaintext/DTLS proxy instance.
 func NewUDPProxy(cfg ListenerConfig, crl *gw.CRLCache, ocsp *gw.OCSPCache, logger *slog.Logger, audit *gw.AuditLogger, tsa *gw.TSAClient, stopCh chan struct{}, bundle *Bundle, lang string, revoker *gw.Revoker, connRegistry *gw.ConnRegistry, nonceCache *gw.NonceCache) (*UDPProxy, error) {
@@ -84,6 +92,7 @@ func NewUDPProxy(cfg ListenerConfig, crl *gw.CRLCache, ocsp *gw.OCSPCache, logge
 		certTracker:  gw.NewConnectionTracker(),
 		connRegistry: connRegistry,
 		nonceCache:   nonceCache,
+		pktSem:       make(chan struct{}, maxConcurrentPackets),
 	}, nil
 }
 
@@ -287,32 +296,116 @@ func (p *UDPProxy) serve() {
 		PacketsTotal.Inc(p.cfg.Name, "received")
 		activeIP := p.trackClient(src)
 
+		// Finding 3: bound concurrent handlers so a flood cannot exhaust
+		// goroutines/sockets. Overflow is dropped, not queued unboundedly.
+		select {
+		case p.pktSem <- struct{}{}:
+		default:
+			PacketDroppedTotal.Inc(p.cfg.Name, "concurrency")
+			continue
+		}
+
 		data := make([]byte, n)
 		copy(data, buf[:n])
-		go p.handlePacket(src, data, activeIP)
+		go func() {
+			defer func() { <-p.pktSem }()
+			p.handlePacket(src, data, activeIP)
+		}()
 	}
 }
+
+// responseAmplified reports whether a relayed response is disproportionately
+// larger than its request (reflection amplification guard, finding 1). The
+// cap is len(request) * factor; when the default factor is used a small floor
+// is applied so tiny queries are still allowed a minimum response. An
+// explicitly-configured factor is honored strictly.
+func (p *UDPProxy) responseAmplified(reqLen, respLen int) bool {
+	if respLen <= reqLen {
+		return false
+	}
+	factor := p.cfg.MaxAmplificationFactor()
+	if factor <= 0 {
+		return false
+	}
+	capBytes := reqLen * factor
+	if !p.cfg.AmplificationExplicit() && capBytes < amplificationResponseFloor {
+		capBytes = amplificationResponseFloor
+	}
+	return respLen > capBytes
+}
+
+// amplificationResponseFloor is the minimum response allowance under the
+// amplification cap (bytes).
+const amplificationResponseFloor = 512
+
+// maxRateLimitEntries caps the number of live per-IP rate buckets. Combined
+// with periodic eviction of expired buckets (finding 2), a spoofed-source
+// flood cannot grow the map without bound.
+const maxRateLimitEntries = 65536
+
+// plaintextDefaultPktsPerIP is the per-IP per-second cap applied to plaintext
+// (unauthenticated) UDP listeners when RequirePlaintextRelayRateLimit is set
+// and max_pkts_per_ip is unset (finding 3).
+const plaintextDefaultPktsPerIP = 64
 
 func (p *UDPProxy) trackClient(src *net.UDPAddr) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var maxPkts int
-	if maxPkts = p.cfg.MaxPktsPerIP(); maxPkts > 0 {
-		key := src.String()
-		bucket, exists := p.rateLimit[key]
-		now := time.Now()
-		if !exists || now.After(bucket.resetAt) {
-			p.rateLimit[key] = &rateBucket{count: 1, resetAt: now.Add(1 * time.Second)}
-		} else if bucket.count >= int64(maxPkts) {
+	maxPkts := p.cfg.MaxPktsPerIP()
+	if maxPkts <= 0 && p.plaintextDefaultRateEnabled() {
+		// Finding 3: an unauthenticated plaintext relay must not be usable for
+		// sustained amplification; apply a default per-IP cap when configured
+		// to do so and the operator set none.
+		maxPkts = plaintextDefaultPktsPerIP
+	}
+	if maxPkts <= 0 {
+		return true
+	}
+
+	key := src.String()
+	now := time.Now()
+	// Finding 2: before inserting into a full map, evict expired buckets so
+	// the map stays bounded under spoofed-source floods.
+	if len(p.rateLimit) >= maxRateLimitEntries {
+		p.evictExpiredRateBucketsLocked(now)
+	}
+	bucket, exists := p.rateLimit[key]
+	if !exists || now.After(bucket.resetAt) {
+		// Map is full and nothing expired: fail closed for this source rather
+		// than grow the map without bound.
+		if len(p.rateLimit) >= maxRateLimitEntries {
 			PacketDroppedTotal.Inc(p.cfg.Name, "rate_limit")
 			return false
-		} else {
-			bucket.count++
 		}
+		p.rateLimit[key] = &rateBucket{count: 1, resetAt: now.Add(1 * time.Second)}
+	} else if bucket.count >= int64(maxPkts) {
+		PacketDroppedTotal.Inc(p.cfg.Name, "rate_limit")
+		return false
+	} else {
+		bucket.count++
 	}
 
 	return true
+}
+
+// plaintextDefaultRateEnabled reports whether default per-IP rate limiting
+// should apply to this plaintext (unauthenticated) listener (finding 3).
+func (p *UDPProxy) plaintextDefaultRateEnabled() bool {
+	if p.cfg.effectiveMode() != gw.TLSModeNone {
+		return false
+	}
+	return p.cfg.UDPExt != nil && p.cfg.UDPExt.RequirePlaintextRelayRateLimitEnabled()
+}
+
+// evictExpiredRateBucketsLocked removes rate buckets whose window has expired,
+// bounding the rateLimit map size (finding 2). Caller holds p.mu.
+func (p *UDPProxy) evictExpiredRateBucketsLocked(now time.Time) {
+	for k, b := range p.rateLimit {
+		if now.After(b.resetAt) {
+			delete(p.rateLimit, k)
+		}
+	}
 }
 
 // totalPktsWindowSec is the duration over which MaxTotalPkts is enforced
@@ -392,6 +485,16 @@ func (p *UDPProxy) handlePacket(src *net.UDPAddr, data []byte, allowed bool) {
 		return
 	}
 
+	// Finding 13: the plaintext relay writes the response to the packet's
+	// source address (src). That is only acceptable on a plaintext
+	// (unauthenticated) listener. In authenticated modes the response must
+	// travel over the authenticated DTLS session to the verified peer; a
+	// caller-supplied src is never trustworthy there. Fail closed.
+	if p.cfg.effectiveMode() != gw.TLSModeNone {
+		PacketDroppedTotal.Inc(p.cfg.Name, "auth_mode_plaintext_path")
+		return
+	}
+
 	if !p.countPacket() {
 		PacketDroppedTotal.Inc(p.cfg.Name, "total_limit")
 		return
@@ -433,6 +536,15 @@ func (p *UDPProxy) handlePacket(src *net.UDPAddr, data []byte, allowed bool) {
 	n, err := conn.Read(resp)
 	if err != nil {
 		PacketDroppedTotal.Inc(p.cfg.Name, "read_response")
+		return
+	}
+
+	// Finding 1: bound reflection amplification. A plaintext UDP relay writes
+	// the backend response back to the (spoofable) source; without a cap a
+	// small query could elicit a large response at a victim. Drop responses
+	// that exceed the request size by more than the configured factor.
+	if p.responseAmplified(len(data), n) {
+		PacketDroppedTotal.Inc(p.cfg.Name, "amplification")
 		return
 	}
 

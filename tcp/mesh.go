@@ -13,6 +13,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gw "github.com/varwof/gateway-core"
@@ -49,6 +50,20 @@ type meshPeer struct {
 type Mesh struct {
 	peers  map[string]*meshPeer
 	logger *slog.Logger
+
+	// conns tracks active mesh listener connections (finding 9 cap).
+	conns atomic.Int64
+}
+
+// canAccept reports whether another mesh listener connection may be accepted
+// under the finding 9 cap.
+func (m *Mesh) canAccept() bool {
+	return m.conns.Load() < maxMeshConns
+}
+
+// activeConns returns the current count of accepted mesh connections.
+func (m *Mesh) activeConns() int64 {
+	return m.conns.Load()
 }
 
 // NewMesh creates a Mesh peer network instance.
@@ -158,6 +173,10 @@ type meshTargetMatcher struct {
 	exact map[string]bool
 	subs  []string // "*.internal.example" suffix domains
 	cidrs []*net.IPNet
+	// configured reports whether any allowlist entries were supplied. When
+	// none are supplied the matcher fails closed (finding 5): the private-net
+	// fallback must not open forwarding to every private/cloud-metadata IP.
+	configured bool
 }
 
 func newMeshTargetMatcher(entries []string) *meshTargetMatcher {
@@ -167,6 +186,7 @@ func newMeshTargetMatcher(entries []string) *meshTargetMatcher {
 		if e == "" {
 			continue
 		}
+		m.configured = true
 		if strings.Contains(e, "/") {
 			if _, ipnet, err := net.ParseCIDR(e); err == nil {
 				m.cidrs = append(m.cidrs, ipnet)
@@ -190,6 +210,13 @@ func newMeshTargetMatcher(entries []string) *meshTargetMatcher {
 
 // Allow determines whether the target (host:port or plain host) is allowed to be forwarded.
 func (m *meshTargetMatcher) Allow(target string) bool {
+	// Finding 5: with no configured allowlist entries, deny everything. A mesh
+	// peer must not be able to forward to arbitrary private/cloud-metadata
+	// addresses purely because they are private (the intended "block public,
+	// allow private" default is not deny-by-default for an inbound target).
+	if m == nil || !m.configured {
+		return false
+	}
 	host := target
 	if h, _, err := net.SplitHostPort(target); err == nil {
 		host = h
@@ -293,7 +320,7 @@ func proxyPeerToBackend(peerConn net.Conn, target string, logger *slog.Logger) {
 	}
 
 	// Validate resolved IPs against the mesh target matcher (DNS rebinding prevention).
-	if meshMatcher != nil {
+	if meshMatcher != nil && meshMatcher.configured {
 		for _, ip := range ips {
 			if !meshMatcher.Allow(ip.IP.String()) {
 				logger.Warn("peer: resolved IP rejected by mesh policy", "target", target, "ip", ip.IP)
@@ -301,8 +328,13 @@ func proxyPeerToBackend(peerConn net.Conn, target string, logger *slog.Logger) {
 			}
 		}
 	} else {
-		// No matcher configured: block link-local/metadata addresses.
+		// No configured matcher: block link-local/metadata addresses (the
+		// forwarding allowlist already fails closed on the inbound listener).
+		// Loopback is exempt — it is not a remote reflection/metadata vector.
 		for _, ip := range ips {
+			if ip.IP.IsLoopback() {
+				continue
+			}
 			if isLinkLocalOrMetadata(ip.IP) {
 				logger.Warn("peer: resolved IP is link-local/metadata, blocking", "target", target, "ip", ip.IP)
 				return
@@ -397,8 +429,23 @@ func (g *Gateway) startMeshListener() error {
 			}
 			// W10 (2026-08-16): Enable keepalive on accepted connections.
 			enableTCPKeepAlive(conn)
+
+			// Finding 9: hard cap on concurrent mesh connections. A single
+			// peer/attacker node must not be able to exhaust goroutines / file
+			// descriptors by opening unbounded connections.
+			if !mesh.canAccept() {
+				conn.Close()
+				g.logger.Warn("mesh: connection limit reached",
+					"max", maxMeshConns, "remote", conn.RemoteAddr().String())
+				continue
+			}
+			mesh.conns.Add(1)
+
 			MeshRequestsReceived.Inc()
-			go handleMeshPeerRequest(conn, allowed, g.logger.With("mesh", "incoming"))
+			go func() {
+				defer mesh.conns.Add(-1)
+				handleMeshPeerRequest(conn, allowed, g.logger.With("mesh", "incoming"))
+			}()
 		}
 	}()
 

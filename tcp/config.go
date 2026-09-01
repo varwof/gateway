@@ -4,12 +4,10 @@
 package tcpgw
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -90,9 +88,23 @@ type Config struct {
 // Save persists the configuration to a JSON file.
 func (c *Config) Save() error {
 	if c.configPath == "" {
-		// M30 fix: add random suffix to prevent symlink attacks on predictable filenames.
-		rnd, _ := rand.Int(rand.Reader, big.NewInt(1<<32))
-		c.configPath = fmt.Sprintf("/tmp/gateway-tcp-%d-%x.json", os.Getpid(), rnd.Uint64())
+		// Finding 14: use os.CreateTemp instead of a predictable /tmp path with
+		// a 32-bit random suffix. CreateTemp picks a high-entropy name and
+		// opens with O_CREATE|O_EXCL (no symlink race), and the file is
+		// created with 0600 perms. A predictable filename would let a local
+		// attacker pre-create a symlink to clobber or redirect the saved
+		// config.
+		f, err := os.CreateTemp("", "gateway-tcp-*.json")
+		if err != nil {
+			return fmt.Errorf("create temp config: %w", err)
+		}
+		c.configPath = f.Name()
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("close temp config: %w", err)
+		}
+		// os.WriteFile below re-opens and overwrites; keep the file
+		// restricted to the owner.
+		_ = os.Chmod(c.configPath, 0o600)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {

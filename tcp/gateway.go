@@ -4,6 +4,10 @@
 package tcpgw
 
 import (
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -12,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -690,8 +695,23 @@ func (g *Gateway) handleRenew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := parsePublicKeyPEM([]byte(req.NewPubKeyPEM)); err != nil {
+	// Finding 11: the request fields must be bound to the presented identity
+	// instead of being ignored. serial_hex must reference the exact certificate
+	// the caller presented via mTLS, and new_pub_key_pem must be the public key
+	// of that certificate — proving the caller controls the key it is renewing.
+	if req.SerialHex != currentSerial {
+		gw.WriteMgmtError(w, http.StatusBadRequest, "serial_hex does not match the presented certificate")
+		return
+	}
+
+	pubKey, err := parsePublicKeyPEM([]byte(req.NewPubKeyPEM))
+	if err != nil {
 		gw.WriteMgmtError(w, http.StatusBadRequest, "invalid public key: "+err.Error())
+		return
+	}
+	if clientCert.PublicKey == nil ||
+		!publicKeysEqual(clientCert.PublicKey, pubKey) {
+		gw.WriteMgmtError(w, http.StatusBadRequest, "new_pub_key_pem does not match the presented certificate")
 		return
 	}
 
@@ -1070,4 +1090,32 @@ func parsePublicKeyPEM(data []byte) (interface{}, error) {
 		return nil, fmt.Errorf("parse public key: %w", err)
 	}
 	return pub, nil
+}
+
+// publicKeysEqual reports whether two crypto public keys are identical.
+// Key types not recognized are compared byte-for-byte (fails closed on
+// mismatch); nil keys never match.
+func publicKeysEqual(a, b interface{}) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	switch ka := a.(type) {
+	case *rsa.PublicKey:
+		kb, ok := b.(*rsa.PublicKey)
+		if !ok || ka.N == nil || kb.N == nil {
+			return false
+		}
+		return ka.E == kb.E && ka.N.Cmp(kb.N) == 0
+	case *ecdsa.PublicKey:
+		kb, ok := b.(*ecdsa.PublicKey)
+		if !ok || ka.Curve != kb.Curve {
+			return false
+		}
+		return ka.X.Cmp(kb.X) == 0 && ka.Y.Cmp(kb.Y) == 0
+	case ed25519.PublicKey:
+		kb, ok := b.(ed25519.PublicKey)
+		return ok && bytes.Equal(ka, kb)
+	default:
+		return reflect.DeepEqual(a, b)
+	}
 }

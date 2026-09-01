@@ -134,15 +134,48 @@ func TestProxyHandleRequestDelegatedAgent(t *testing.T) {
 }
 
 func TestProxyHandleRequestMaxTotalConns(t *testing.T) {
-	backend, close := startSlowBackend(t)
-	defer close()
+	backend, closeBackend := startSlowBackend(t)
+	defer closeBackend()
+
+	// Finding 10: max_total_conns must count live connections, not requests.
+	// Under keep-alive a single connection issuing many requests must not
+	// bypass the cap, so the limit is enforced on ConnState (connection) level.
+	// Use the real HTTP server path (Start) to trigger ConnState New/Closed.
 	p := newDirectProxy(t, ListenerConfig{
-		Name: "total", Protocol: ProtocolHTTP2,
+		Name: "total", Listen: "127.0.0.1:0", Protocol: ProtocolHTTP2,
 		TLS:    &gw.TLSConfig{MaxTotalConns: 1},
 		Routes: []RouteConfig{{Path: "/api/*", Target: backend}},
 	})
+	if err := p.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer p.Stop()
 
-	statuses := concurrentRequests(t, p, false, "/api/")
+	addr := p.listener.Addr().String()
+	statuses := make([]int, 2)
+	startCh := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-startCh
+			// Each goroutine uses an independent Transport to force a new TCP connection.
+			tr := &http.Transport{DisableKeepAlives: true}
+			defer tr.CloseIdleConnections()
+			resp, err := tr.RoundTrip(httptest.NewRequest("GET", "http://"+addr+fmt.Sprintf("/api/r%d", i), nil))
+			if err != nil {
+				statuses[i] = http.StatusServiceUnavailable
+				return
+			}
+			defer resp.Body.Close()
+			io.Copy(io.Discard, resp.Body)
+			statuses[i] = resp.StatusCode
+		}(i)
+	}
+	close(startCh)
+	wg.Wait()
+
 	has503 := false
 	for _, s := range statuses {
 		if s == http.StatusServiceUnavailable {
@@ -150,7 +183,40 @@ func TestProxyHandleRequestMaxTotalConns(t *testing.T) {
 		}
 	}
 	if !has503 {
-		t.Fatalf("statuses = %v, want at least one 503", statuses)
+		t.Fatalf("statuses = %v, want at least one 503 (total connection limit)", statuses)
+	}
+}
+
+// TestProxyKeepAliveSingleConnNotLimited verifies finding 10: a single
+// connection issuing multiple sequential requests must NOT be throttled by
+// max_total_conns (it counts connections, not requests).
+func TestProxyKeepAliveSingleConnNotLimited(t *testing.T) {
+	backend, closeBackend := startSlowBackend(t)
+	defer closeBackend()
+
+	p := newDirectProxy(t, ListenerConfig{
+		Name: "total-keepalive", Listen: "127.0.0.1:0", Protocol: ProtocolHTTP2,
+		TLS:    &gw.TLSConfig{MaxTotalConns: 1},
+		Routes: []RouteConfig{{Path: "/api/*", Target: backend}},
+	})
+	if err := p.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer p.Stop()
+
+	addr := p.listener.Addr().String()
+	tr := &http.Transport{}
+	defer tr.CloseIdleConnections()
+	for i := 0; i < 5; i++ {
+		resp, err := tr.RoundTrip(httptest.NewRequest("GET", "http://"+addr+fmt.Sprintf("/api/k%d", i), nil))
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			t.Fatalf("request %d: got 503 on a single keep-alive connection; max_total_conns must count connections, not requests", i)
+		}
 	}
 }
 

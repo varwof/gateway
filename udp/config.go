@@ -5,10 +5,8 @@ package udpgw
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -72,8 +70,19 @@ type Config struct {
 // Save persists the configuration to a JSON file.
 func (c *Config) Save() error {
 	if c.configPath == "" {
-		rnd, _ := rand.Int(rand.Reader, big.NewInt(1<<32))
-		c.configPath = fmt.Sprintf("/tmp/gateway-udp-%d-%x.json", os.Getpid(), rnd.Uint64())
+		// Finding 14: use os.CreateTemp instead of a predictable /tmp path with
+		// a 32-bit random suffix. CreateTemp picks a high-entropy name and
+		// opens with O_CREATE|O_EXCL (no symlink race), and the file is
+		// created with 0600 perms.
+		f, err := os.CreateTemp("", "gateway-udp-*.json")
+		if err != nil {
+			return fmt.Errorf("create temp config: %w", err)
+		}
+		c.configPath = f.Name()
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("close temp config: %w", err)
+		}
+		_ = os.Chmod(c.configPath, 0o600)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
@@ -185,6 +194,22 @@ func (l *ListenerConfig) MaxPktsPerIP() int {
 		return l.UDPExt.MaxPktsPerIP
 	}
 	return 0
+}
+
+// MaxAmplificationFactor returns the response amplification factor applied to
+// relayed responses (finding 1). 0 falls back to the default.
+func (l *ListenerConfig) MaxAmplificationFactor() int {
+	if l.UDPExt != nil {
+		return l.UDPExt.MaxAmplificationFactor()
+	}
+	return gw.MaxAmplificationDefault
+}
+
+// AmplificationExplicit reports whether the operator configured an explicit
+// amplification factor (vs. the default). An explicit factor is honored
+// strictly with no response floor (finding 1).
+func (l *ListenerConfig) AmplificationExplicit() bool {
+	return l.UDPExt != nil && l.UDPExt.MaxAmplification > 0
 }
 
 // MaxTotalPkts returns the global max total packet count (0=unlimited).

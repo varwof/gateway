@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -259,5 +260,53 @@ func TestMappingAcceptAfterStop(t *testing.T) {
 	}
 	if m.State() != MappingStopped {
 		t.Fatalf("State() = %v, want stopped", m.State())
+	}
+}
+
+// TestMappingSlowHandshakeDefaultTimeout (finding 4): with idle_timeout unset,
+// a client that connects but never completes the TLS handshake is disconnected
+// by a default handshake deadline (previously held indefinitely → slowloris).
+func TestMappingSlowHandshakeDefaultTimeout(t *testing.T) {
+	old := defaultHandshakeTimeout
+	defaultHandshakeTimeout = 500 * time.Millisecond
+	defer func() { defaultHandshakeTimeout = old }()
+
+	dir := t.TempDir()
+	caCert, caKey := generateTestCA(t, dir)
+	generateTestCert(t, dir, "server", caCert, caKey, nil)
+
+	echoSrv := startEchoServer(t)
+	defer echoSrv.Close()
+
+	m, err := NewMapping(MappingConfig{
+		Name: "slow-hs", Listen: "127.0.0.1:0", Target: echoSrv.Addr().String(),
+		Protocol: ProtocolTCPMTLS,
+		TLS: &gw.TLSConfig{
+			CACertFile: filepath.Join(dir, "ca.pem"),
+			CertFile:   filepath.Join(dir, "server.pem"),
+			KeyFile:    filepath.Join(dir, "server.key"),
+			AllowRoles: []string{"gateway:mysql-prod"},
+		},
+	}, nil, nil, nil, nil, NewBundle(), "en", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewMapping: %v", err)
+	}
+	if err := m.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop()
+
+	// Open a raw TCP connection and send nothing: the server-side handshake
+	// must time out and close the connection even with idle_timeout=0.
+	conn, err := net.Dial("tcp", m.listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	buf := make([]byte, 1)
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("server should close the stalled handshake (finding 4)")
 	}
 }

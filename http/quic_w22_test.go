@@ -138,7 +138,9 @@ func TestQUICProxyH3CompletedAudit(t *testing.T) {
 	}
 }
 
-// TestQUICProxyH3TotalLimit W22: MaxTotalConns concurrent limit exceeded returns 503.
+// TestQUICProxyH3TotalLimit W22/finding10: MaxTotalConns concurrent connection
+// limit exceeded returns 503. The limit counts live QUIC connections (connTotal),
+// not requests — H3 multiplexes many requests over one connection.
 func TestQUICProxyH3TotalLimit(t *testing.T) {
 	backend, close := startEchoHeadersBackend(t)
 	defer close()
@@ -148,9 +150,10 @@ func TestQUICProxyH3TotalLimit(t *testing.T) {
 		Name: "h3", Protocol: ProtocolH3, TLS: &gw.TLSConfig{MaxTotalConns: 1},
 		Routes: []RouteConfig{{Path: "/echo", Target: hostport}},
 	})
-	// One in-flight request already occupies MaxTotalConns=1 -> new request gets 503.
-	atomicAddInt64(&q.conns, 1)
-	defer atomicAddInt64(&q.conns, -1)
+	// Two live QUIC connections against a cap of 1 -> the request gets 503.
+	// The check is connTotal > maxTotal, so exceeding by one triggers it.
+	atomic.StoreInt64(&q.connTotal, 2)
+	defer atomic.StoreInt64(&q.connTotal, 0)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "http://x/echo", nil)
@@ -304,11 +307,6 @@ func TestQUICW22Wiring(t *testing.T) {
 	if ql.taskRegistry != taskReg {
 		t.Error("taskRegistry not wired to QUIC listener")
 	}
-}
-
-// atomicAddInt64 test helper: performs atomic increment/decrement on q.conns.
-func atomicAddInt64(p *int64, delta int64) int64 {
-	return atomic.AddInt64(p, delta)
 }
 
 // newTestAudit returns an audit logger writing to a temp file + a read-back function.

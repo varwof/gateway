@@ -23,6 +23,23 @@ func TestNewMesh(t *testing.T) {
 	}
 }
 
+// TestMeshConnectionCap verifies finding 9: the mesh listener must refuse to
+// accept connections beyond maxMeshConns so a single peer cannot exhaust
+// goroutines / file descriptors.
+func TestMeshConnectionCap(t *testing.T) {
+	m := NewMesh(nil, nil)
+	if !m.canAccept() {
+		t.Fatalf("fresh mesh must accept connections")
+	}
+	m.conns.Store(maxMeshConns)
+	if m.canAccept() {
+		t.Fatal("mesh accepted a connection beyond maxMeshConns")
+	}
+	if m.activeConns() != maxMeshConns {
+		t.Fatalf("activeConns = %d, want %d", m.activeConns(), maxMeshConns)
+	}
+}
+
 func TestNewMeshEmptyPeers(t *testing.T) {
 	m := NewMesh([]MeshPeerConfig{}, nil)
 	if m == nil {

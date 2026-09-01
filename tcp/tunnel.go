@@ -4,11 +4,12 @@
 package tcpgw
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -111,6 +112,12 @@ func (t *Tunnel) Conns() int64 {
 	return atomic.LoadInt64(&t.conns)
 }
 
+// canAccept reports whether another local connection may be accepted under the
+// finding 9 cap.
+func (t *Tunnel) canAccept() bool {
+	return atomic.LoadInt64(&t.conns) < maxTunnelConns
+}
+
 // Name returns the tunnel name.
 func (t *Tunnel) Name() string {
 	return t.cfg.Name
@@ -138,6 +145,15 @@ func (t *Tunnel) acceptLoop(local net.Listener) {
 		}
 		// W10 (2026-08-16): Enable keepalive on accepted connections.
 		enableTCPKeepAlive(localConn)
+
+		// Finding 9: hard cap on concurrent tunnel connections so a flood of
+		// local connections cannot exhaust goroutines / file descriptors.
+		if !t.canAccept() {
+			localConn.Close()
+			t.logger.Warn("tunnel connection limit reached",
+				"name", t.cfg.Name, "max", maxTunnelConns, "remote", localConn.RemoteAddr().String())
+			continue
+		}
 
 		// W03: wg.Add runs inside t.mu and re-checks stopCh — Stop() holds t.mu and calls wg.Wait(),
 		// avoiding Add∥Wait race (concurrent Add with Wait when WaitGroup counter is 0 is undefined behavior);
@@ -229,7 +245,10 @@ func (t *Tunnel) dialWithRetry() (net.Conn, error) {
 
 		// Note (2026-08-16): time.After leaks — the timer cannot be reclaimed before it fires,
 		// leaking one timer up to 30s per retry. Switched to a stoppable Timer.
-		timer := time.NewTimer(backoff + time.Duration(rand.Int63n(int64(backoff/2))))
+		// Finding 12: jitter comes from crypto/rand (not math/rand) so reconnect
+		// timing is not predictable to an observer — predictable jitter would let
+		// a network observer anticipate reconnect windows and correlate dials.
+		timer := time.NewTimer(backoff + time.Duration(jitterInt64(int64(backoff/2))))
 		select {
 		case <-timer.C:
 		case <-t.stopCh:
@@ -242,4 +261,23 @@ func (t *Tunnel) dialWithRetry() (net.Conn, error) {
 			backoff = maxBackoff
 		}
 	}
+}
+
+// jitterInt64 returns a non-negative random value in [0, max) drawn from
+// crypto/rand (finding 12). math/rand was previously used for reconnect
+// jitter; its PRNG is deterministic, making reconnect timing predictable to an
+// observer. crypto/rand keeps jitter unguessable. max must be > 0.
+func jitterInt64(max int64) int64 {
+	if max <= 0 {
+		return 0
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failing is catastrophic; fall back to 0 jitter rather
+		// than a predictable value.
+		return 0
+	}
+	// Modulo bias is acceptable here: the bias is only used to jitter a
+	// reconnect timer, never for security decisions.
+	return int64(binary.LittleEndian.Uint64(b[:]) % uint64(max))
 }

@@ -52,6 +52,7 @@ func TestUDPProxyHandlePacketEcho(t *testing.T) {
 	p := &UDPProxy{
 		cfg: ListenerConfig{
 			Name:           "handle",
+			Protocol:       ProtocolUDP, // plaintext: handlePacket response path is valid
 			MaxPacketSize:  65535,
 			Routes:         []RouteConfig{{Target: echoConn.LocalAddr().String()}},
 			ReadTimeoutSec: 5,

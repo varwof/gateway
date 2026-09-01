@@ -4,9 +4,12 @@
 package tcpgw
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -300,11 +303,23 @@ func TestHandleConfigReload(t *testing.T) {
 }
 
 func TestHandleRenew(t *testing.T) {
+	peerKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
 	peerCert := &x509.Certificate{
 		SerialNumber: big.NewInt(4242),
 		Subject:      pkixName("renew-client"),
 		DNSNames:     []string{"renew-client.example"},
+		PublicKey:    &peerKey.PublicKey,
 	}
+	peerPubPEM := func() string {
+		der, err := x509.MarshalPKIXPublicKey(&peerKey.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	}()
 
 	newReq := func(method, path, body string) *http.Request {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -342,8 +357,40 @@ func TestHandleRenew(t *testing.T) {
 	t.Run("invalid pubkey", func(t *testing.T) {
 		g := newTestGateway()
 		rec := httptest.NewRecorder()
-		body := `{"serial_hex":"1","new_pub_key_pem":"not-a-pem"}`
+		body := `{"serial_hex":"1092","new_pub_key_pem":"not-a-pem"}`
 		g.handleRenew(rec, newReq(http.MethodPost, "/", body))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400, body %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("serial mismatch", func(t *testing.T) {
+		g := newTestGateway()
+		body, err := json.Marshal(map[string]string{
+			"serial_hex":      "deadbeef",
+			"new_pub_key_pem": peerPubPEM,
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		g.handleRenew(rec, newReq(http.MethodPost, "/", string(body)))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400, body %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("pubkey mismatch", func(t *testing.T) {
+		g := newTestGateway()
+		body, err := json.Marshal(map[string]string{
+			"serial_hex":      "1092",
+			"new_pub_key_pem": pubKeyPEM(t),
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		g.handleRenew(rec, newReq(http.MethodPost, "/", string(body)))
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400, body %s", rec.Code, rec.Body.String())
 		}
@@ -351,10 +398,9 @@ func TestHandleRenew(t *testing.T) {
 
 	t.Run("short-lived not configured", func(t *testing.T) {
 		g := newTestGateway()
-		pem := pubKeyPEM(t)
 		body, err := json.Marshal(map[string]string{
-			"serial_hex":      "4242",
-			"new_pub_key_pem": pem,
+			"serial_hex":      "1092",
+			"new_pub_key_pem": peerPubPEM,
 		})
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
@@ -369,10 +415,9 @@ func TestHandleRenew(t *testing.T) {
 	t.Run("issue client init fails", func(t *testing.T) {
 		g := newTestGateway()
 		g.cfg.ShortLived = &gw.IssueConfig{}
-		pem := pubKeyPEM(t)
 		body, err := json.Marshal(map[string]string{
-			"serial_hex":      "4242",
-			"new_pub_key_pem": pem,
+			"serial_hex":      "1092",
+			"new_pub_key_pem": peerPubPEM,
 		})
 		if err != nil {
 			t.Fatalf("marshal: %v", err)

@@ -18,6 +18,9 @@ import (
 	gw "github.com/varwof/gateway-core"
 )
 
+// TestMeshTargetMatcherDefaults (finding 5): an empty allowlist fails closed —
+// without configured entries a mesh peer must not be able to forward to
+// arbitrary private/cloud-metadata addresses.
 func TestMeshTargetMatcherDefaults(t *testing.T) {
 	m := newMeshTargetMatcher(nil)
 
@@ -25,14 +28,37 @@ func TestMeshTargetMatcherDefaults(t *testing.T) {
 		target string
 		allow  bool
 	}{
-		{"127.0.0.1:8080", true},    // loopback
-		{"10.0.0.5:22", true},       // RFC1918 private
-		{"192.168.1.100:443", true}, // private
-		{"172.16.3.9:80", true},     // private
-		{"[::1]:8080", true},        // IPv6 loopback
-		{"[fc00::1]:443", true},     // ULA
-		{"8.8.8.8:53", false},       // public → rejected
-		{"example.com:443", false},  // public domain → rejected
+		{"127.0.0.1:8080", false},     // loopback → rejected (no allowlist)
+		{"10.0.0.5:22", false},        // RFC1918 private → rejected
+		{"192.168.1.100:443", false},  // private → rejected
+		{"172.16.3.9:80", false},      // private → rejected
+		{"169.254.169.254:80", false}, // cloud metadata → rejected
+		{"[::1]:8080", false},         // IPv6 loopback → rejected
+		{"[fc00::1]:443", false},      // ULA → rejected
+		{"8.8.8.8:53", false},         // public → rejected
+		{"example.com:443", false},    // public domain → rejected
+	}
+	for _, c := range cases {
+		if got := m.Allow(c.target); got != c.allow {
+			t.Errorf("Allow(%q) = %v, want %v", c.target, got, c.allow)
+		}
+	}
+}
+
+// TestMeshTargetMatcherExplicitPrivate (finding 5): with an explicit CIDR
+// allowlist, only explicit entries match; non-allowlisted targets (including
+// private/metadata addresses) are rejected.
+func TestMeshTargetMatcherExplicitPrivate(t *testing.T) {
+	m := newMeshTargetMatcher([]string{"10.0.0.0/8"})
+
+	cases := []struct {
+		target string
+		allow  bool
+	}{
+		{"10.1.2.3:22", true},         // within explicit allowlist
+		{"192.168.1.100:443", false},  // private but not allowlisted → rejected
+		{"169.254.169.254:80", false}, // cloud metadata not allowlisted → rejected
+		{"8.8.8.8:53", false},         // public → rejected
 	}
 	for _, c := range cases {
 		if got := m.Allow(c.target); got != c.allow {
@@ -82,6 +108,9 @@ func TestMeshListenerRequiresMTLS(t *testing.T) {
 		logger:    slog.Default(),
 		cfg: &Config{
 			MeshListen: "127.0.0.1:0",
+			MeshAllowedTargets: []string{
+				"127.0.0.0/8", // loopback echo target used below
+			},
 			Peers: []MeshPeerConfig{{
 				Name: "peer", Addr: "127.0.0.1:1",
 				CACertFile: filepath.Join(dir, "ca.pem"),

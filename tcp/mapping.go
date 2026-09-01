@@ -108,6 +108,24 @@ const tcpKeepAlivePeriod = 60 * time.Second
 // and CPU spinning during persistent EMFILE/ENFILE failures).
 const acceptErrorBackoff = 200 * time.Millisecond
 
+// maxMeshConns is a hard ceiling on concurrent mesh listener connections
+// (finding 9): the mesh accept loop spawns a goroutine per accepted connection
+// and has no per-IP or total caps, so a single peer/attacker node could
+// exhaust goroutines / file descriptors. The cap bounds total accepted
+// connections regardless of peer count.
+const maxMeshConns = 1024
+
+// maxTunnelConns is a hard ceiling on concurrent tunnel connections
+// (finding 9): the tunnel accept loop also spawns a goroutine per accepted
+// connection with no cap. It bounds the total concurrent local connections.
+const maxTunnelConns = 1024
+
+// defaultHandshakeTimeout bounds the TLS handshake phase when no idle_timeout
+// is configured (finding 4): a client must not be able to hold a connection
+// during a slow/incomplete handshake indefinitely. Kept as a var so tests can
+// lower it.
+var defaultHandshakeTimeout = 30 * time.Second
+
 // Write rolls the deadline to now+idle before each write (activity-refreshed idle timeout, W05).
 func (c *idleConn) Write(p []byte) (int, error) {
 	if c.idle > 0 {
@@ -438,9 +456,14 @@ func (m *Mapping) handleConn(incoming net.Conn) {
 		}
 		// H5: SetDeadline — anti-DoS (slow handshake protection). Only protects the handshake phase,
 		// cleared afterwards to avoid conflicting with W05 idleConn's rolling deadline (W39).
-		if idleTimeout > 0 {
-			incoming.SetDeadline(time.Now().Add(idleTimeout))
+		// Finding 4: at idle_timeout=0 (unset) a client could otherwise hold a
+		// connection during a slow/incomplete handshake indefinitely (slowloris);
+		// apply a default handshake deadline instead.
+		hsTimeout := idleTimeout
+		if hsTimeout <= 0 {
+			hsTimeout = defaultHandshakeTimeout
 		}
+		incoming.SetDeadline(time.Now().Add(hsTimeout))
 		if err := tlsConn.Handshake(); err != nil {
 			m.logger.Warn(m.bundle.T(m.lang, "mapping.tls_handshake_failed"), "name", m.cfg.Name, "src_ip", srcIP, "error", err)
 			return
