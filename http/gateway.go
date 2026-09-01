@@ -240,6 +240,17 @@ func (g *Gateway) loadCapabilityRegistry(cfg *Config) {
 		g.logger.Warn("capability registry reload failed, keeping existing", "error", err)
 		return
 	}
+	if cfg.CapabilitySchemesTrust != "" {
+		if err := loader.SetTrustRoot(cfg.CapabilitySchemesTrust); err != nil {
+			g.logger.Warn("capability registry trust root failed, keeping existing", "error", err)
+			return
+		}
+		// Re-verify + reload under the configured trust root (fail-closed).
+		if err := loader.Reload(cfg.CapabilitySchemes); err != nil {
+			g.logger.Warn("capability registry signature verification failed, keeping existing", "error", err)
+			return
+		}
+	}
 	gw.SetGlobalCapabilityRegistry(loader)
 	g.logger.Info("capability registry loaded", "schemes", len(loader.Registry().SchemeIDs()), "dir", cfg.CapabilitySchemes)
 }

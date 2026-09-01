@@ -75,6 +75,10 @@ type Config struct {
 	// hot-updates the policy). Once enabled, data plane verification requires AIC-declared
 	// capabilities to be registered.
 	CapabilitySchemes string `json:"capability_schemes,omitempty"`
+	// CapabilitySchemesTrust is an optional PEM trust root for PKCS#7 (.p7s)
+	// verification of capability definitions before they are loaded. Empty
+	// disables signature verification.
+	CapabilitySchemesTrust string `json:"capability_schemes_trust,omitempty"`
 	// PolicySigning is the authorization policy file signature verification configuration.
 	PolicySigning *gw.PolicySigningConfig `json:"policy_signing,omitempty"`
 	// AuditIndexFile is the audit FTS index file path. When set, enables the

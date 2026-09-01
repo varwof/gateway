@@ -11,15 +11,23 @@
 package capreg
 
 import (
+	"crypto/x509"
 	"fmt"
+	"io/fs"
+	"path/filepath"
+	"strings"
 
 	"github.com/varwof/register"
 )
 
 // Loader loads the capability registry.
 // When dir is empty, the embedded scheme is used; when a directory is specified, disk override applies (edit JSON for hot updates).
+// When a trust root is set, every capability JSON must carry a valid PKCS#7
+// detached signature (.p7s) from that root before it is loaded (supply-chain
+// integrity for the registry).
 type Loader struct {
-	reg *register.Registry
+	reg        *register.Registry
+	trustRoots []*x509.Certificate
 }
 
 // New creates a Loader. If dir is empty, only the embedded scheme is used.
@@ -29,6 +37,21 @@ func New(dir string) (*Loader, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+// SetTrustRoot configures the PEM trust root used to verify capability .p7s
+// signatures. Empty path disables signature verification.
+func (l *Loader) SetTrustRoot(path string) error {
+	if path == "" {
+		l.trustRoots = nil
+		return nil
+	}
+	roots, err := register.LoadCertFile(path)
+	if err != nil {
+		return fmt.Errorf("capreg: load trust root: %w", err)
+	}
+	l.trustRoots = roots
+	return nil
 }
 
 // Registry returns the current registry instance.
@@ -43,6 +66,11 @@ func (l *Loader) Registry() *register.Registry {
 func (l *Loader) Reload(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("capreg: capability data directory required (embedded schemes removed)")
+	}
+	if len(l.trustRoots) > 0 {
+		if err := verifySchemeSignatures(dir, l.trustRoots); err != nil {
+			return err
+		}
 	}
 	reg, err := register.NewRegistryFromDisk(dir)
 	if err != nil {
@@ -65,4 +93,26 @@ func (l *Loader) ValidateCapability(formatted string) error {
 	}
 	_, _, err := l.reg.ValidateCapability(formatted)
 	return err
+}
+
+// verifySchemeSignatures verifies every capability JSON in the tree against
+// its .p7s signature using the configured trust root. Missing or invalid
+// signatures fail closed (the existing registry, if any, is kept).
+func verifySchemeSignatures(dir string, roots []*x509.Certificate) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".json") {
+			return nil
+		}
+		if err := register.VerifyCapabilityPKCS7(path, roots); err != nil {
+			return fmt.Errorf("capreg: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
