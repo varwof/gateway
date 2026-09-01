@@ -7,12 +7,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -128,6 +130,96 @@ func newJWTProxyListener(t *testing.T, caCert *x509.Certificate) *ProxyListener 
 	return p
 }
 
+// newJWTProxyListenerTLS builds a TLS (server-auth) ProxyListener whose bearer
+// auth trusts the given CA. The transport is encrypted, so bearer tokens are
+// acceptable (finding 6: bearer requires an encrypted transport).
+func newJWTProxyListenerTLS(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) *ProxyListener {
+	t.Helper()
+	backendURL, backendClose := startTestBackend(t)
+	t.Cleanup(backendClose)
+
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srvTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "jwt-tls-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     []string{"jwt-tls-test"},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	srvDER, err := x509.CreateCertificate(rand.Reader, srvTmpl, caCert, &serverKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "server.pem")
+	keyFile := filepath.Join(dir, "server.key")
+	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvDER})
+	if err := os.WriteFile(certFile, pemCert, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := ListenerConfig{
+		Name:     "test-jwt-tls",
+		Listen:   "127.0.0.1:0",
+		Protocol: ProtocolHTTP2,
+		TLS: &gw.TLSConfig{
+			Mode:      gw.TLSModeServer,
+			JWTCAFile: writeCAFile(t, caCert),
+			CertFile:  certFile,
+			KeyFile:   keyFile,
+		},
+		Routes: []RouteConfig{
+			{Path: "/*", Target: backendURL},
+		},
+	}
+	audit, _ := gw.NewAuditLogger("", nil, 0, 0)
+	p, err := NewProxyListener(cfg, nil, nil, audit, nil, nil, nil, "en", nil, nil)
+	if err != nil {
+		t.Fatalf("NewProxyListener(TLS): %v", err)
+	}
+	if p.jwtVerifier == nil {
+		t.Fatal("jwtVerifier not loaded from JWTCAFile")
+	}
+	if err := p.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { p.Stop() })
+	return p
+}
+
+func getBearerTLS(t *testing.T, addr, tok string) (int, string) {
+	t.Helper()
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	client := &http.Client{Transport: tr}
+	req, err := http.NewRequest(http.MethodGet, "https://"+addr+"/test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, strings.TrimSpace(string(body))
+}
+
 func getBearer(t *testing.T, addr, tok string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/test", nil)
@@ -148,7 +240,7 @@ func getBearer(t *testing.T, addr, tok string) (int, string) {
 
 func TestProxyBearerAuthValid(t *testing.T) {
 	caCert, caKey := jwtTestCA(t)
-	p := newJWTProxyListener(t, caCert)
+	p := newJWTProxyListenerTLS(t, caCert, caKey)
 
 	kid, err := aicjwt.SPKIHash(caCert, "sha-256")
 	if err != nil {
@@ -159,7 +251,7 @@ func TestProxyBearerAuthValid(t *testing.T) {
 	})
 
 	addr := p.listener.Addr().String()
-	status, body := getBearer(t, addr, tok)
+	status, body := getBearerTLS(t, addr, tok)
 	if status != http.StatusOK {
 		t.Fatalf("valid bearer: status = %d body=%q, want 200", status, body)
 	}
@@ -169,15 +261,15 @@ func TestProxyBearerAuthValid(t *testing.T) {
 }
 
 func TestProxyBearerAuthInvalid(t *testing.T) {
-	caCert, _ := jwtTestCA(t)
-	p := newJWTProxyListener(t, caCert)
+	caCert, caKey := jwtTestCA(t)
+	p := newJWTProxyListenerTLS(t, caCert, caKey)
 
 	otherCA, otherKey := jwtTestCA(t)
 	kid, _ := aicjwt.SPKIHash(otherCA, "sha-256")
 	tok := jwtTestToken(t, otherCA, otherKey, kid, "agent-a", "r", "principal-a", nil)
 
 	addr := p.listener.Addr().String()
-	status, body := getBearer(t, addr, tok)
+	status, body := getBearerTLS(t, addr, tok)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("invalid bearer: status = %d body=%q, want 401", status, body)
 	}
@@ -187,13 +279,36 @@ func TestProxyBearerAuthInvalid(t *testing.T) {
 }
 
 func TestProxyBearerAuthMalformed(t *testing.T) {
-	caCert, _ := jwtTestCA(t)
-	p := newJWTProxyListener(t, caCert)
+	caCert, caKey := jwtTestCA(t)
+	p := newJWTProxyListenerTLS(t, caCert, caKey)
 
 	addr := p.listener.Addr().String()
-	status, body := getBearer(t, addr, "not-a-jwt")
+	status, body := getBearerTLS(t, addr, "not-a-jwt")
 	if status != http.StatusUnauthorized {
 		t.Fatalf("malformed bearer: status = %d body=%q, want 401", status, body)
+	}
+}
+
+// A bearer token presented over a plaintext (unencrypted) transport must be
+// rejected (finding 6): the token could have been captured by an
+// eavesdropper, so it cannot prove the caller is the token's subject.
+func TestProxyBearerAuthRejectedOverPlaintext(t *testing.T) {
+	caCert, caKey := jwtTestCA(t)
+	p := newJWTProxyListener(t, caCert)
+
+	kid, err := aicjwt.SPKIHash(caCert, "sha-256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := jwtTestToken(t, caCert, caKey, kid, "agent-a", "r", "principal-a", nil)
+
+	addr := p.listener.Addr().String()
+	status, body := getBearer(t, addr, tok)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("bearer over plaintext: status = %d body=%q, want 401", status, body)
+	}
+	if !strings.Contains(body, "bearer_tls_required") {
+		t.Fatalf("body = %q, want bearer_tls_required error code", body)
 	}
 }
 
@@ -204,11 +319,10 @@ func TestProxyBearerAuthAbsent(t *testing.T) {
 	p := newJWTProxyListener(t, caCert)
 
 	addr := p.listener.Addr().String()
-	status, body := getBearer(t, addr, "")
-	if status != http.StatusOK {
-		t.Fatalf("no bearer: status = %d body=%q, want 200", status, body)
-	}
-	if body != "ok" {
-		t.Fatalf("body = %q, want ok", body)
+	status, _ := getBearer(t, addr, "")
+	// Fail-closed: a bearer-configured listener must deny requests without a
+	// bearer token, never silently allow anonymous access.
+	if status != http.StatusUnauthorized {
+		t.Fatalf("no bearer: status = %d, want 401", status)
 	}
 }

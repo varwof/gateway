@@ -27,6 +27,7 @@ import (
 	"time"
 
 	gw "github.com/varwof/gateway-core"
+	"github.com/varwof/types/aicjwt"
 	"golang.org/x/net/http2"
 )
 
@@ -89,7 +90,13 @@ type ProxyListener struct {
 	// HTTP/1.1 keep-alive and HTTP/2 multiplexing a single connection carries multiple requests,
 	// so per-IP limits must count by connection, otherwise a single client with 100 concurrent
 	// streams would exhaust max_conns_per_ip.
-	connIPs        map[string]int64
+	connIPs map[string]int64
+	// connTotal tracks the total number of live underlying TCP connections
+	// (finding 10). max_total_conns is enforced against this connection count
+	// rather than the per-request conns counter, so HTTP/1.1 keep-alive and
+	// HTTP/2 multiplexing can no longer bypass the cap by issuing many
+	// requests over one connection.
+	connTotal      int64
 	routes         []Route
 	certTracker    *gw.ConnectionTracker
 	revoker        *gw.Revoker
@@ -154,6 +161,16 @@ func NewProxyListener(cfg ListenerConfig, crlCache *gw.CRLCache, ocspCache *gw.O
 		if err != nil {
 			return nil, fmt.Errorf("load jwt CA %q: %w", cfg.TLS.JWTCAFile, err)
 		}
+		// Binding + replay protection (finding 5): bind bearers to the configured
+		// issuer/audience and enable one-time-use jti/DA-nonce replay protection
+		// by default. Proof-of-possession is enforced per request against the
+		// presented mTLS client key in handleConnection.
+		replayOn := cfg.TLS.JWTReplayProtection == nil || *cfg.TLS.JWTReplayProtection
+		var nonces aicjwt.NonceStore
+		if replayOn {
+			nonces = gw.NewReplayNonceStore(0, 0)
+		}
+		verifier.SetBearerPolicy(cfg.TLS.JWTIssuer, cfg.TLS.JWTAudience, nonces)
 		p.jwtVerifier = verifier
 	}
 	p.state.Store(ProxyStopped)
@@ -308,10 +325,12 @@ func (p *ProxyListener) trackConnState(c net.Conn, st http.ConnState) {
 	case http.StateNew:
 		// W25 (2026-08-16): Wire up ConnectionsAccepted (previously registered but never incremented).
 		ConnectionsAccepted.Inc(p.cfg.Name)
+		atomic.AddInt64(&p.connTotal, 1) // finding 10: count live connections for max_total_conns
 		p.ipMu.Lock()
 		p.connIPs[host]++
 		p.ipMu.Unlock()
 	case http.StateClosed, http.StateHijacked:
+		atomic.AddInt64(&p.connTotal, -1)
 		p.ipMu.Lock()
 		p.connIPs[host]--
 		if p.connIPs[host] <= 0 {
@@ -451,7 +470,12 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if t := p.cfg.TLS; t != nil {
 		maxTotal = t.MaxTotalConns
 	}
-	if maxTotal > 0 && atomic.LoadInt64(&p.conns) > int64(maxTotal) {
+	// Finding 10: enforce max_total_conns against the live underlying
+	// connection count (connTotal), not the per-request counter. Under
+	// HTTP/1.1 keep-alive and HTTP/2/HTTP/3 multiplexing a single connection
+	// carries many requests; counting by request would let one connection
+	// bypass the cap.
+	if maxTotal > 0 && atomic.LoadInt64(&p.connTotal) > int64(maxTotal) {
 		writeProxyError(w, http.StatusServiceUnavailable, "http.server_busy",
 			p.bundle.T(p.lang, "http.server_busy"))
 		return
@@ -479,6 +503,16 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 		// precedence over a bearer token.
 		if len(chain) == 0 {
 			if tok := bearerToken(r); tok != "" && p.jwtVerifier != nil {
+				// Finding 6: a bearer token must never be accepted over a
+				// plaintext (unencrypted) listener — an eavesdropper could
+				// capture and replay it. Require a TLS transport.
+				if r.TLS == nil {
+					p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
+						"bearer_token_over_plaintext", nil))
+					writeProxyError(w, http.StatusUnauthorized, "http.bearer_tls_required",
+						p.bundle.T(p.lang, "http.bearer_tls_required"))
+					return
+				}
 				cert, _, err := p.jwtVerifier.VerifyBearer(tok, time.Now())
 				if err != nil {
 					p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
@@ -492,6 +526,14 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 			} else if mode == gw.TLSModeMTLS {
 				writeProxyError(w, http.StatusUnauthorized, "http.mtls_required",
 					p.bundle.T(p.lang, "http.mtls_required"))
+				return
+			} else if p.jwtVerifier != nil {
+				// Bearer-only listener (server/none TLS + jwt_ca_file): a
+				// missing bearer token must be denied, never silently allowed.
+				p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
+					"bearer_required", nil))
+				writeProxyError(w, http.StatusUnauthorized, "http.bearer_required",
+					p.bundle.T(p.lang, "http.bearer_required"))
 				return
 			}
 		}
@@ -566,7 +608,7 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 		// longer injected. X-Agent-TTL is only injected with session expiry when certificate
 		// passthrough is enabled.
 		if gw.HasDelegatedAgentOU(clientCert) {
-			_, expiry, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal)
+			_, _, reason := gw.DelegatedAgentServerIdentity(clientCert, result.Principal)
 			if reason != "" {
 				p.audit.Log(gw.NewAuditEntryDenied(r.RemoteAddr, p.cfg.Name, r.URL.Path,
 					reason, clientCert))
@@ -587,9 +629,10 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 						r.Header.Set("X-Client-Cert-Agent-ID", aic.AgentId)
 					}
 				}
-				if !expiry.IsZero() {
-					r.Header.Set("X-Agent-TTL", expiry.UTC().Format(time.RFC3339))
-				}
+				// X-Agent-TTL is intentionally not injected here: it would only
+				// reflect the certificate NotAfter, which backends already see
+				// in X-Client-Cert-DER. The header is reserved for an explicit
+				// session expiry, which is no longer emitted.
 			}
 		}
 	}

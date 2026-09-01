@@ -37,7 +37,9 @@
         "method_not_allowed": "方法不允许",
         "forbidden": "禁止访问",
         "cert_conn_limit": "已达每证书连接数上限",
-        "bearer_invalid": "无效的 Bearer 令牌"
+        "bearer_required": "需要 Bearer 令牌",
+        "bearer_invalid": "无效的 Bearer 令牌",
+        "bearer_tls_required": "Bearer 令牌需要加密传输"
     },
     "cert": {
         "expiry_monitor": "监听器 %q: 客户端证书将于 %s 过期",

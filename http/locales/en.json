@@ -37,7 +37,9 @@
         "method_not_allowed": "method not allowed",
         "forbidden": "forbidden",
         "cert_conn_limit": "per-certificate connection limit exceeded",
-        "bearer_invalid": "invalid bearer token"
+        "bearer_required": "bearer token required",
+        "bearer_invalid": "invalid bearer token",
+        "bearer_tls_required": "bearer token requires an encrypted transport"
     },
     "cert": {
         "expiry_monitor": "listener %q: client cert expires at %s",
