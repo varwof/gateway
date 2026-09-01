@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/pion/dtls/v2 v2.2.12
 	github.com/quic-go/quic-go v0.48.2
-	github.com/varwof/gateway-core v0.4.3
+	github.com/varwof/gateway-core v0.4.4
 	github.com/varwof/register v0.1.0
 	github.com/varwof/types v0.4.1
 	golang.org/x/net v0.56.0
