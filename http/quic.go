@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -412,13 +413,10 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 		var allowRoles []string
 		var requiredCaps []string
 		path := r.URL.Path
-		for i := range q.cfg.Routes {
-			if matchPath(q.cfg.Routes[i].Path, path) {
-				allowRoles = q.cfg.Routes[i].AllowRoles
-				requiredCaps = q.cfg.Routes[i].RequiredCapabilities
-				matchedRoute = &q.cfg.Routes[i]
-				break
-			}
+		if r := q.matchConfigRoute(path); r != nil {
+			allowRoles = r.AllowRoles
+			requiredCaps = r.RequiredCapabilities
+			matchedRoute = r
 		}
 
 		result = gw.RunAccessPipeline(peerCerts, &gw.PipelineConfig{
@@ -576,12 +574,7 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := r.URL.Path
-	for i := range q.cfg.Routes {
-		if matchPath(q.cfg.Routes[i].Path, path) {
-			matchedRoute = &q.cfg.Routes[i]
-			break
-		}
-	}
+	matchedRoute = q.matchConfigRoute(path)
 	if matchedRoute == nil {
 		q.audit.Log(gw.AuditEntry{
 			Action:  "no_route",
@@ -678,15 +671,56 @@ func (q *QUICListener) proxyH3Request(w http.ResponseWriter, r *http.Request) {
 }
 
 func matchPath(pattern, path string) bool {
+	// H4/consistent routing: normalize the request path (path.Clean + case-fold)
+	// before matching, exactly as the HTTP proxy matcher does, so that "//", "./",
+	// "/x/../" and case variants cannot slip past a route and fall through to a
+	// broader allow-all rule (RBAC bypass). Keeps QUIC and HTTP routing consistent.
+	cleaned := pathpkg.Clean(path)
+	if cleaned == "/" {
+		cleaned = ""
+	}
+	lower := strings.ToLower(cleaned)
+	normalized := strings.TrimSuffix(lower, "/")
+
 	if pattern == "" {
-		return path == "/"
+		return lower == "" || lower == "/"
 	}
-	if len(pattern) > 0 && pattern[len(pattern)-1] == '*' {
-		prefix := pattern[:len(pattern)-1]
-		return len(path) >= len(prefix) && path[:len(prefix)] == prefix &&
-			(len(path) == len(prefix) || path[len(prefix)] == '/')
+	lowerPattern := strings.ToLower(pattern)
+
+	if strings.HasSuffix(lowerPattern, "/*") {
+		prefix := strings.TrimSuffix(lowerPattern, "/*")
+		if strings.HasPrefix(lower, prefix) {
+			rest := strings.TrimPrefix(lower, prefix)
+			if rest == "" || strings.HasPrefix(rest, "/") {
+				return true
+			}
+		}
+		if normalized != lower && strings.HasPrefix(normalized, prefix) {
+			rest := strings.TrimPrefix(normalized, prefix)
+			if rest == "" || strings.HasPrefix(rest, "/") {
+				return true
+			}
+		}
+		return false
 	}
-	return pattern == path
+	return lowerPattern == lower || (normalized != lower && lowerPattern == normalized)
+}
+
+// matchConfigRoute resolves the longest-matching RouteConfig for a request path,
+// mirroring the HTTP proxy's longest-match routing so QUIC and HTTP select the
+// same route for the same path.
+func (q *QUICListener) matchConfigRoute(path string) *RouteConfig {
+	var best *RouteConfig
+	bestLen := -1
+	for i := range q.cfg.Routes {
+		r := &q.cfg.Routes[i]
+		if matchPath(r.Path, path) {
+			if l := len(r.Path); l > bestLen {
+				best, bestLen = r, l
+			}
+		}
+	}
+	return best
 }
 
 // backendHTTPClient returns a shared http.Client with a pooled Transport (M5).
@@ -728,9 +762,16 @@ func (q *QUICListener) proxyToBackend(w http.ResponseWriter, r *http.Request, ro
 	outReq.Host = u.Host
 
 	tr := q.backendTransportShared()
+	var errTr error
 	if u.Scheme == "https" && route.UpstreamTLS != nil {
 		// W18/W22: HTTPS backend custom CA + client certificate reverse-connect.
-		if tc, err := upstreamTLSConfig(route.UpstreamTLS, u.Host); err == nil && tc != nil {
+		// Fail closed like the HTTP proxy path: an explicitly configured but
+		// broken upstream TLS block must not silently fall back to system roots.
+		tc, err := upstreamTLSConfig(route.UpstreamTLS, u.Host)
+		if err != nil {
+			q.logger.Error("proxyToBackend: upstream tls config", "route", route.Target, "error", err)
+			errTr = err
+		} else if tc != nil {
 			tr = tr.Clone()
 			tr.TLSClientConfig = tc
 		}
@@ -747,9 +788,14 @@ func (q *QUICListener) proxyToBackend(w http.ResponseWriter, r *http.Request, ro
 			return http.ErrUseLastResponse
 		},
 	}
+	if errTr != nil {
+		client.Transport = &upstreamTLSFailTransport{err: errTr}
+	}
 	resp, err := client.Do(outReq)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		// Log detailed error server-side; return generic message to client.
+		q.logger.Error("upstream request failed", "error", err, "host", r.Host)
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

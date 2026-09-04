@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -152,7 +153,11 @@ func NewGateway(cfg *Config, bundle *Bundle, lang string, audit *gw.AuditLogger,
 		})
 	}
 	g.loadAuthorizationPolicy()
-	g.loadCapabilityRegistry(g.cfg)
+	if err := g.loadCapabilityRegistry(g.cfg); err != nil {
+		// Startup proceeds but loudly: capability_schemes is configured yet no
+		// registry could be established, so capability validation is disabled.
+		g.logger.Error("capability validation DISABLED: capability_schemes configured but registry failed to load", "error", err)
+	}
 
 	return g
 }
@@ -222,37 +227,55 @@ func (g *Gateway) loadRulePlugins(cfg *Config, reg *gw.PluginRegistry) ([]string
 //	Specified directory -> disk override; empty string but non-empty config -> embedded scheme.
 //
 // On successful load, sets the gateway-core package-level registry (for data plane pipeline verification).
-// Called with newCfg during Reload for hot-reload; on failure, keeps existing registry (non-blocking).
-func (g *Gateway) loadCapabilityRegistry(cfg *Config) {
-	if cfg == nil || cfg.CapabilitySchemes == "" {
-		return
+// Called with newCfg during Reload for hot-reload; on reload failure with an
+// existing registry, keeps the existing registry (non-blocking). Returns an
+// error only when capability_schemes is configured but no registry can be
+// established at all (fail-closed: the caller must abort the reload instead of
+// silently running without capability validation).
+func (g *Gateway) loadCapabilityRegistry(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.CapabilitySchemes == "" {
+		// Capability validation was unset (e.g. removed on a SIGHUP reload): disable it
+		// instead of leaving a previously-loaded registry active. SetGlobalCapabilityRegistry(nil)
+		// is documented to disable capability registration validation.
+		gw.SetGlobalCapabilityRegistry(nil)
+		g.logger.Info("capability registry disabled (capability_schemes unset)")
+		return nil
 	}
 	loader := g.capReg
 	if loader == nil {
 		var err error
 		loader, err = capreg.New(cfg.CapabilitySchemes)
 		if err != nil {
-			g.logger.Warn("capability registry load failed, keeping existing", "error", err)
-			return
+			// No existing registry to fall back to — fail-closed: the caller
+			// aborts the reload rather than silently leaving capability
+			// validation disabled while the config asks for it.
+			g.logger.Error("capability registry initial load failed", "error", err)
+			return fmt.Errorf("load capability registry: %w", err)
 		}
-		g.capReg = loader
 	} else if err := loader.Reload(cfg.CapabilitySchemes); err != nil {
 		g.logger.Warn("capability registry reload failed, keeping existing", "error", err)
-		return
+		return nil
 	}
 	if cfg.CapabilitySchemesTrust != "" {
 		if err := loader.SetTrustRoot(cfg.CapabilitySchemesTrust); err != nil {
 			g.logger.Warn("capability registry trust root failed, keeping existing", "error", err)
-			return
+			// g.capReg is only assigned after full verification below, so an
+			// unverified loader is never cached; a later reload retries fresh.
+			return nil
 		}
 		// Re-verify + reload under the configured trust root (fail-closed).
 		if err := loader.Reload(cfg.CapabilitySchemes); err != nil {
 			g.logger.Warn("capability registry signature verification failed, keeping existing", "error", err)
-			return
+			return nil
 		}
 	}
+	g.capReg = loader
 	gw.SetGlobalCapabilityRegistry(loader)
 	g.logger.Info("capability registry loaded", "schemes", len(loader.Registry().SchemeIDs()), "dir", cfg.CapabilitySchemes)
+	return nil
 }
 
 // Start starts all HTTP gateway listeners and management services.
@@ -466,7 +489,12 @@ func (g *Gateway) Reload() error {
 	g.loadAuthorizationPolicyFor(newCfg)
 
 	// Hot-update capability registry (capability_schemes changes take effect immediately).
-	g.loadCapabilityRegistry(newCfg)
+	// Fail-closed: if capability_schemes is configured but no registry can be
+	// established (and there is no existing registry to keep), abort the reload
+	// instead of silently running without capability validation.
+	if err := g.loadCapabilityRegistry(newCfg); err != nil {
+		return err
+	}
 
 	oldListeners := g.listeners
 
@@ -532,6 +560,22 @@ func (g *Gateway) Reload() error {
 		}
 
 		ocspCache := buildOCSPCache(lc.TLS, g.bundle, g.lang)
+
+		// W26 pre-flight: verify a changed/new listen address is bindable *before* any
+		// old lifecycle is torn down. A Phase-2 Start() failure would otherwise leave a
+		// half-new/half-old listener set with no rollback. Catching a port conflict here
+		// lets Reload fail cleanly with the old listeners still running.
+		//
+		// The check is skipped when the new listener keeps the exact address of the
+		// same-named old listener it replaces: Phase 2 stops that old listener (freeing
+		// the port) before Start()-ing the new one, so binding there is guaranteed.
+		if oldBind := oldListeners[lc.Name]; oldBind == nil ||
+			oldBind.Config().Listen != lc.Listen || oldBind.Config().Protocol != lc.Protocol {
+			if err := preflightListen(lc); err != nil {
+				close(newStopCh)
+				return fmt.Errorf("listener %q: listen preflight %w", lc.Name, err)
+			}
+		}
 
 		p, err := g.newListener(lc, crlCache, ocspCache, g.nonceCache)
 		if err != nil {
@@ -631,6 +675,27 @@ func configsEqual(a, b ListenerConfig) bool {
 	aJSON, _ := json.Marshal(a)
 	bJSON, _ := json.Marshal(b)
 	return string(aJSON) == string(bJSON)
+}
+
+// preflightListen verifies that a listener's configured address can be bound before
+// any hot-reload teardown happens. It briefly binds the address and immediately
+// closes it. This makes Phase-2 Start() failures (port conflicts) surface during
+// Phase-1 construction instead — so Reload fails cleanly with old listeners intact.
+func preflightListen(lc ListenerConfig) error {
+	switch lc.Protocol {
+	case ProtocolH3, ProtocolQUIC:
+		pc, err := net.ListenPacket("udp", lc.Listen)
+		if err != nil {
+			return err
+		}
+		return pc.Close()
+	default:
+		l, err := net.Listen("tcp", lc.Listen)
+		if err != nil {
+			return err
+		}
+		return l.Close()
+	}
 }
 
 func (g *Gateway) startManagement() (*gw.ManagementServer, error) {

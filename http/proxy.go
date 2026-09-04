@@ -917,23 +917,50 @@ func (p *ProxyListener) transportForProtocol(proto string, upstream *UpstreamTLS
 	case BackendProtoH1:
 		tr := p.transport.Clone()
 		tr.ForceAttemptHTTP2 = false
-		if tc, err := upstreamTLSConfig(upstream, p.cfg.Name); err != nil {
-			// W18: Config errors should not be silent -- log and fall back to system root (equivalent to no custom mTLS).
+		tc, err := upstreamTLSConfig(upstream, p.cfg.Name)
+		if err != nil {
+			// Fail closed when upstream TLS was explicitly configured: a backend
+			// expecting mutual TLS must never be contacted silently without the
+			// intended client certificate / private CA. An errorTransport rejects
+			// the request loudly instead of falling back to system roots.
 			p.logger.Error("transportForProtocol: upstream tls config", "route", proto, "error", err)
-		} else if tc != nil {
+			return &upstreamTLSFailTransport{err: err}
+		}
+		if tc != nil {
 			tr.TLSClientConfig = tc
 		}
 		return tr
 	default:
-		if tc, err := upstreamTLSConfig(upstream, p.cfg.Name); err != nil {
+		tc, err := upstreamTLSConfig(upstream, p.cfg.Name)
+		if err != nil {
 			p.logger.Error("transportForProtocol: upstream tls config", "route", proto, "error", err)
-		} else if tc != nil {
+			return &upstreamTLSFailTransport{err: err}
+		}
+		if tc != nil {
 			tr := p.transport.Clone()
 			tr.TLSClientConfig = tc
 			return tr
 		}
 		return p.transport
 	}
+}
+
+// upstreamTLSFailTransport rejects every request when an explicitly-configured
+// upstream TLS/mTLS block fails to build (missing/broken CA or client-cert
+// files). It guarantees fail-closed behavior: an operator who asked for backend
+// mutual TLS never gets a silent fallback to system-root verification.
+//
+// A route with no UpstreamTLS block, or a block that builds successfully, never
+// reaches this type — it is only installed on a *configuration error*.
+type upstreamTLSFailTransport struct{ err error }
+
+// RoundTrip implements http.RoundTripper by failing every request.
+// Returns a generic error — the detailed t.err is logged server-side.
+func (t *upstreamTLSFailTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	if t == nil {
+		return nil, errors.New("upstream TLS transport unavailable")
+	}
+	return nil, errors.New("upstream TLS configuration error")
 }
 
 // deriveRequiredCaps derives RequiredCapabilities from the capability prefix and HTTP method.

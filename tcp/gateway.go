@@ -157,7 +157,11 @@ func NewGateway(cfg *Config, bundle *Bundle, lang string, audit *gw.AuditLogger,
 		})
 	}
 	g.loadAuthorizationPolicy()
-	g.loadCapabilityRegistry(g.cfg)
+	if err := g.loadCapabilityRegistry(g.cfg); err != nil {
+		// Startup proceeds but loudly: capability_schemes is configured yet no
+		// registry could be established, so capability validation is disabled.
+		g.logger.Error("capability validation DISABLED: capability_schemes configured but registry failed to load", "error", err)
+	}
 	return g
 }
 
@@ -203,26 +207,42 @@ func (g *Gateway) loadAuthorizationPolicy() {
 //	specified directory → disk override; empty string directory but non-empty config → embedded scheme.
 //
 // On successful load, sets the gateway-core package-level registry (for data plane pipeline validation).
-// During Reload, calls with newCfg for hot reload; on failure, keeps the existing registry (non-blocking).
-func (g *Gateway) loadCapabilityRegistry(cfg *Config) {
-	if cfg == nil || cfg.CapabilitySchemes == "" {
-		return
+// During Reload, calls with newCfg for hot reload; on reload failure with an
+// existing registry, keeps the existing registry (non-blocking). Returns an
+// error only when capability_schemes is configured but no registry can be
+// established at all (fail-closed: the caller must abort the reload instead of
+// silently running without capability validation).
+func (g *Gateway) loadCapabilityRegistry(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.CapabilitySchemes == "" {
+		// Capability validation was unset (e.g. removed on a SIGHUP reload): disable it
+		// instead of leaving a previously-loaded registry active. SetGlobalCapabilityRegistry(nil)
+		// is documented to disable capability registration validation.
+		gw.SetGlobalCapabilityRegistry(nil)
+		g.logger.Info("capability registry disabled (capability_schemes unset)")
+		return nil
 	}
 	loader := g.capReg
 	if loader == nil {
 		var err error
 		loader, err = capreg.New(cfg.CapabilitySchemes)
 		if err != nil {
-			g.logger.Warn("capability registry load failed, keeping existing", "error", err)
-			return
+			// No existing registry to fall back to — fail-closed: the caller
+			// aborts the reload rather than silently leaving capability
+			// validation disabled while the config asks for it.
+			g.logger.Error("capability registry initial load failed", "error", err)
+			return fmt.Errorf("load capability registry: %w", err)
 		}
 		g.capReg = loader
 	} else if err := loader.Reload(cfg.CapabilitySchemes); err != nil {
 		g.logger.Warn("capability registry reload failed, keeping existing", "error", err)
-		return
+		return nil
 	}
 	gw.SetGlobalCapabilityRegistry(loader)
 	g.logger.Info("capability registry loaded", "schemes", len(loader.Registry().SchemeIDs()), "dir", cfg.CapabilitySchemes)
+	return nil
 }
 
 // handleRiskAction handles disposition actions triggered by risk rules:
@@ -842,7 +862,12 @@ func (g *Gateway) Reload() error {
 	}
 
 	// Hot-update capability registry (capability_schemes changes take effect immediately).
-	g.loadCapabilityRegistry(newCfg)
+	// Fail-closed: if capability_schemes is configured but no registry can be
+	// established (and there is no existing registry to keep), abort the reload
+	// instead of silently running without capability validation.
+	if err := g.loadCapabilityRegistry(newCfg); err != nil {
+		return err
+	}
 
 	oldMappings := g.mappings
 	newMappings := make(map[string]*Mapping)

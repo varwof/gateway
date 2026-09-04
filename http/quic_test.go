@@ -32,13 +32,15 @@ func TestMatchPath(t *testing.T) {
 		{"", "/", true},
 		{"", "/a", false},
 		{"/api/*", "/api/", true},
-		{"/api/*", "/api/v1", false},
+		{"/api/*", "/api/v1", true},
 		{"/api/*", "/api//v1", true},
 		{"/api/*", "/apix", false},
 		{"/api/*", "/", false},
+		{"/api/*", "/api", true},
 		{"/health", "/health", true},
 		{"/health", "/healthx", false},
-		{"/health", "/Health", false},
+		{"/health", "/Health", true},
+		{"/health", "/Health/../health", true},
 	}
 	for _, c := range cases {
 		if got := matchPath(c.pattern, c.path); got != c.want {
