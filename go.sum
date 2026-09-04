@@ -42,8 +42,6 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/varwof/gateway-core v0.4.5 h1:XNrzN+78dnFhxUWGl394hkvdfdy/EGUihvnyStO5hn8=
-github.com/varwof/gateway-core v0.4.5/go.mod h1:R7obc82vVKfwe8SNzRrYLD9f+N++ymtfLl883bIuUVo=
 github.com/varwof/gateway-core v0.4.7 h1:pMIjTduzXMFUB4k81bUaLINkBeFkbTRGYC/HyqJrc7k=
 github.com/varwof/gateway-core v0.4.7/go.mod h1:R7obc82vVKfwe8SNzRrYLD9f+N++ymtfLl883bIuUVo=
 github.com/varwof/pkcs7 v0.1.0 h1:zA8ZZtJqosoUvzuqB1dapf0x6VazcmSE6j9IkyEbS0Q=
