@@ -1,5 +1,8 @@
 # varwof-gateway
 
+> ⭐ Like this repo? Give a star to the flagship one:
+> [![GitHub stars](https://img.shields.io/github/stars/varwof/core?style=social&label=varwof/core)](https://github.com/varwof/core)
+
 > Three-layer zero-trust security gateway — TCP/HTTP/UDP with mTLS mutual authentication + fine-grained RBAC + AIC capability verification.
 
 > ⚠️ **Preview** — Not for production use. APIs and features may change before official release.
