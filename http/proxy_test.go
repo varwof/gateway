@@ -29,8 +29,8 @@ func TestDeriveRequiredCaps(t *testing.T) {
 		{"varwof/demo-mysql-v1", "GET", "varwof/demo-mysql-v1:SELECT:*"},
 		{"varwof/demo-mysql-v1", "POST", "varwof/demo-mysql-v1:INSERT:*"},
 		{"varwof/demo-mysql-v1", "DELETE", "varwof/demo-mysql-v1:DELETE:*"},
-		{"varwof/core", "GET", "varwof/core:GET:*"},
-		{"varwof/core", "DELETE", "varwof/core:DELETE:*"},
+		{"varwof/core-v1", "GET", "varwof/core-v1:GET:*"},
+		{"varwof/core-v1", "DELETE", "varwof/core-v1:DELETE:*"},
 		{"cap", "GET", "cap:GET:*"},
 	}
 	for _, tt := range tests {

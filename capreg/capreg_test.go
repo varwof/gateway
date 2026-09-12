@@ -46,10 +46,10 @@ func TestLoaderLoad(t *testing.T) {
 	if len(l.Registry().SchemeIDs()) == 0 {
 		t.Fatal("expected loaded schemes")
 	}
-	if err := l.ValidateCapability("varwof/core:cert:issue"); err != nil {
+	if err := l.ValidateCapability("varwof/core-v1:cert:issue"); err != nil {
 		t.Errorf("expected registered capability valid: %v", err)
 	}
-	if err := l.ValidateCapability("varwof/core:no:such:cap"); err == nil {
+	if err := l.ValidateCapability("varwof/core-v1:no:such:cap"); err == nil {
 		t.Error("expected unregistered capability to fail")
 	}
 }
@@ -67,11 +67,11 @@ func TestLoaderOverride(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	// Base capability should still be valid
-	if err := l.ValidateCapability("varwof/core:cert:issue"); err != nil {
+	if err := l.ValidateCapability("varwof/core-v1:cert:issue"); err != nil {
 		t.Errorf("override lost base capability: %v", err)
 	}
 	// Override-added capability should be valid
-	if err := l.ValidateCapability("varwof/core:audit:export"); err != nil {
+	if err := l.ValidateCapability("varwof/core-v1:audit:export"); err != nil {
 		t.Errorf("override capability missing: %v", err)
 	}
 }
@@ -101,7 +101,7 @@ func TestLoaderReloadKeepsOnError(t *testing.T) {
 }
 
 const coreJSON = `{
-  "scheme_id": "varwof/core",
+  "scheme_id": "varwof/core-v1",
   "version": "1",
   "name": "varwof core",
   "capabilities": [
@@ -114,7 +114,7 @@ const coreJSON = `{
 }`
 
 const overrideJSON = `{
-  "scheme_id": "varwof/core",
+  "scheme_id": "varwof/core-v1",
   "version": "1",
   "name": "varwof core (override)",
   "capabilities": [

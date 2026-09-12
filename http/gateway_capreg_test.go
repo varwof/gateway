@@ -57,10 +57,10 @@ func TestHTTPGateway_CapabilitySchemesEnabled(t *testing.T) {
 	if cr == nil {
 		t.Fatal("expected global registry set")
 	}
-	if err := cr.ValidateCapability("varwof/core:cert:issue"); err != nil {
+	if err := cr.ValidateCapability("varwof/core-v1:cert:issue"); err != nil {
 		t.Errorf("expected registered capability valid: %v", err)
 	}
-	if err := cr.ValidateCapability("varwof/core:not:registered"); err == nil {
+	if err := cr.ValidateCapability("varwof/core-v1:not:registered"); err == nil {
 		t.Error("expected unregistered capability to fail")
 	}
 }
@@ -86,7 +86,7 @@ func TestHTTPGateway_ReloadCapabilitySchemes(t *testing.T) {
 
 	// Write a new version: add cap audit:export, verify it takes effect after reload
 	updated := `{
-  "scheme_id": "varwof/core",
+  "scheme_id": "varwof/core-v1",
   "version": "2",
   "name": "varwof core (v2)",
   "capabilities": [
@@ -103,7 +103,7 @@ func TestHTTPGateway_ReloadCapabilitySchemes(t *testing.T) {
 
 	// Directly call reload logic (bypassing file lock/port binding)
 	g.loadCapabilityRegistry(&Config{CapabilitySchemes: dir})
-	if err := gw.GetGlobalCapabilityRegistry().ValidateCapability("varwof/core:audit:export"); err != nil {
+	if err := gw.GetGlobalCapabilityRegistry().ValidateCapability("varwof/core-v1:audit:export"); err != nil {
 		t.Errorf("expected reloaded capability valid: %v", err)
 	}
 }
@@ -193,13 +193,13 @@ func TestHTTPGateway_ReloadCapabilityRegistryKeepsExisting(t *testing.T) {
 	if cr == nil {
 		t.Fatal("expected global registry still set after failed reload")
 	}
-	if err := cr.ValidateCapability("varwof/core:cert:issue"); err != nil {
+	if err := cr.ValidateCapability("varwof/core-v1:cert:issue"); err != nil {
 		t.Errorf("expected existing registry still functional: %v", err)
 	}
 }
 
 const overrideCoreJSON = `{
-  "scheme_id": "varwof/core",
+  "scheme_id": "varwof/core-v1",
   "version": "1",
   "name": "varwof core",
   "capabilities": [
