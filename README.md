@@ -1,7 +1,6 @@
 # varwof-gateway
 
-> ⭐ Like this repo? Give a star to the flagship one:
-> [![GitHub stars](https://img.shields.io/github/stars/varwof/core?style=social&label=varwof/core)](https://github.com/varwof/core)
+> Part of the Varwof AIC suite — flagship repos: [aic-agent](https://github.com/varwof/aic-agent) · [aic-verifier](https://github.com/varwof/aic-verifier) · [aic-exec](https://github.com/varwof/aic-exec)
 
 > Three-layer zero-trust security gateway — TCP/HTTP/UDP with mTLS mutual authentication + fine-grained RBAC + AIC capability verification.
 
