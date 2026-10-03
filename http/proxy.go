@@ -487,6 +487,11 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 	var result *gw.PipelineResult
 	var matchedRoute *Route
 	mode := p.cfg.effectiveMode()
+	// bearer records that the credential is an AIC-JWT bearer carrier: its
+	// delegation is the outer.da claim, verified by jwtVerifier.VerifyBearer
+	// before this point, so the X.509 DelegationAuthorization check does not
+	// apply to the synthesized placeholder (see SynthesizeCertFromJWT).
+	bearer := false
 	var chain []*x509.Certificate
 	if r.TLS != nil {
 		chain = r.TLS.PeerCertificates
@@ -525,6 +530,7 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 				}
 				clientCert = cert
 				chain = []*x509.Certificate{cert}
+				bearer = true
 			} else if mode == gw.TLSModeMTLS {
 				writeProxyError(w, http.StatusUnauthorized, "http.mtls_required",
 					p.bundle.T(p.lang, "http.mtls_required"))
@@ -578,26 +584,31 @@ func (p *ProxyListener) handleRequest(w http.ResponseWriter, r *http.Request) {
 			r.Body = io.NopCloser(bytes.NewReader(opBody))
 		}
 		result = gw.RunAccessPipeline(chain, &gw.PipelineConfig{
-			CRLCache:                 p.crlCache.Load(),
-			OCSPCache:                p.ocspCache,
-			CheckScope:               gw.CheckFullChain,
-			RequireAIC:               p.cfg.TLS.RequireAICEnabled(),
-			RequireSPIFFE:            p.cfg.TLS.RequireSPIFFEEnabled(),
-			AllowedSPIFFEIDs:         p.cfg.TLS.AllowedSPIFFEIDs,
-			SPIFFETrustDomain:        p.cfg.TLS.SPIFFETrustDomain,
-			RequiredCapabilities:     requiredCaps,
-			DisallowRepresentative:   p.cfg.TLS.DisallowRepresentativeEnabled(),
-			RequireUserAuth:          p.cfg.TLS.RequireUserAuthEnabled(),
-			ClientIP:                 clientIP,
-			HTTPFacts:                httpFactsFor(r, opBody),
-			EnforceConstraints:       true,
-			StrictConstraints:        true,
-			CapabilityPluginRegistry: p.pluginRegistry,
-			CapabilityPluginResolver: p.policyResolver,
-			PolicyVersion:            p.currentPolicyVersion(),
-			AuditLogger:              p.audit,
-			NonceCache:               p.nonceCache,
-			RiskMonitor:              p.riskMonitor,
+			CRLCache:               p.crlCache.Load(),
+			OCSPCache:              p.ocspCache,
+			CheckScope:             gw.CheckFullChain,
+			RequireAIC:             p.cfg.TLS.RequireAICEnabled(),
+			RequireSPIFFE:          p.cfg.TLS.RequireSPIFFEEnabled(),
+			AllowedSPIFFEIDs:       p.cfg.TLS.AllowedSPIFFEIDs,
+			SPIFFETrustDomain:      p.cfg.TLS.SPIFFETrustDomain,
+			RequiredCapabilities:   requiredCaps,
+			DisallowRepresentative: p.cfg.TLS.DisallowRepresentativeEnabled(),
+			RequireUserAuth:        p.cfg.TLS.RequireUserAuthEnabled(),
+			// A bearer carrier has no X.509 DA to verify; a real delegation carried
+			// in the token was checked by the JWT layer. mTLS certificates keep the
+			// mandatory check (default), which fails closed when the principal
+			// certificate is unavailable.
+			SkipDelegationAuthVerification: bearer || p.cfg.TLS.SkipDelegationAuthVerificationEnabled(),
+			ClientIP:                       clientIP,
+			HTTPFacts:                      httpFactsFor(r, opBody),
+			EnforceConstraints:             true,
+			StrictConstraints:              true,
+			CapabilityPluginRegistry:       p.pluginRegistry,
+			CapabilityPluginResolver:       p.policyResolver,
+			PolicyVersion:                  p.currentPolicyVersion(),
+			AuditLogger:                    p.audit,
+			NonceCache:                     p.nonceCache,
+			RiskMonitor:                    p.riskMonitor,
 			// G2(b): When OCSP fallback is allow (fail-open), enforce offline certificate lifetime <=1h.
 			OfflineMaxCertLifetime: gw.OfflineLifetimeFor(p.cfg.TLS.OCSPFallback),
 		})

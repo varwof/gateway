@@ -358,6 +358,13 @@ func (m *MappingConfig) RequireUserAuthEnabled() bool {
 	return m.TLS.RequireUserAuthEnabled()
 }
 
+// SkipDelegationAuthVerificationEnabled reports whether the mandatory
+// DelegationAuthorization verification is disabled for this mapping
+// (default false: the check runs).
+func (m *MappingConfig) SkipDelegationAuthVerificationEnabled() bool {
+	return m.TLS.SkipDelegationAuthVerificationEnabled()
+}
+
 // DisallowRepresentativeEnabled returns whether the delegation proxy mode is disabled.
 func (m *MappingConfig) DisallowRepresentativeEnabled() bool {
 	return m.TLS.DisallowRepresentativeEnabled()

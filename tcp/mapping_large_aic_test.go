@@ -18,6 +18,7 @@ import (
 	"time"
 
 	gw "github.com/varwof/gateway-core"
+	"github.com/varwof/gateway/internal/gwtest"
 )
 
 // largeAICWithAuth builds an AIC with required KeyHash + DelegationAuthorization.
@@ -74,15 +75,17 @@ func genLargeAICCertForTCP(t *testing.T, dir, cn string, caCert *x509.Certificat
 		}
 	}
 
-	finalExt := largeAICWithAuth(cn, caps)
-	extDER, err := asn1.Marshal(finalExt)
-	if err != nil {
-		t.Fatalf("final asn1.Marshal: %v", err)
-	}
-
 	clientKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
+	}
+	finalExt := largeAICWithAuth(cn, caps)
+	if err := gwtest.SelfAuthorizeDA(clientKey, &finalExt); err != nil {
+		t.Fatalf("self-authorize AIC: %v", err)
+	}
+	extDER, err := asn1.Marshal(finalExt)
+	if err != nil {
+		t.Fatalf("final asn1.Marshal: %v", err)
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),

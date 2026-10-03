@@ -22,6 +22,7 @@ import (
 	"time"
 
 	gw "github.com/varwof/gateway-core"
+	"github.com/varwof/gateway/internal/gwtest"
 	pki "github.com/varwof/types"
 )
 
@@ -51,6 +52,16 @@ func marshalTestAIC(t *testing.T) []byte {
 func makeExtCert(t *testing.T, cn string, ous []string, org []string, exts []pkix.Extension) *x509.Certificate {
 	t.Helper()
 	key := genKey(t)
+	// DelegationAuthorization verification is mandatory, so an AIC extension
+	// fixture must carry a verifiable self-authorized delegation rather than a
+	// placeholder signature.
+	for i := range exts {
+		v, err := gwtest.SelfAuthorizeExtension(key, exts[i].Id, exts[i].Value)
+		if err != nil {
+			t.Fatalf("self-authorize AIC: %v", err)
+		}
+		exts[i].Value = v
+	}
 	tmpl := &x509.Certificate{
 		SerialNumber:    big.NewInt(time.Now().UnixNano()),
 		Subject:         pkix.Name{CommonName: cn, OrganizationalUnit: ous, Organization: org},

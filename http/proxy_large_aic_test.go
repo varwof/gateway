@@ -22,6 +22,7 @@ import (
 	"time"
 
 	gw "github.com/varwof/gateway-core"
+	"github.com/varwof/gateway/internal/gwtest"
 )
 
 func genLargeAICCertHTTP(t *testing.T, dir, cn string, caCert *x509.Certificate, caKey *rsa.PrivateKey, ous []string, targetBytes int) (certPEM, keyPEM string) {
@@ -53,9 +54,12 @@ func genLargeAICCertHTTP(t *testing.T, dir, cn string, caCert *x509.Certificate,
 			t.Fatalf("reached 256 cap limit at target %d (got %d)", targetBytes, len(der))
 		}
 	}
-	finalExt := largeAIC(caps)
-	extDER, _ := asn1.Marshal(finalExt)
 	clientKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	finalExt := largeAIC(caps)
+	if err := gwtest.SelfAuthorizeDA(clientKey, &finalExt); err != nil {
+		t.Fatalf("self-authorize AIC: %v", err)
+	}
+	extDER, _ := asn1.Marshal(finalExt)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: cn, OrganizationalUnit: ous},

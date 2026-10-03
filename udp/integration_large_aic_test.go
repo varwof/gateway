@@ -24,6 +24,7 @@ import (
 	"github.com/quic-go/quic-go"
 
 	gw "github.com/varwof/gateway-core"
+	"github.com/varwof/gateway/internal/gwtest"
 )
 
 func genLargeAICCertUDP(t *testing.T, dir string, caCert *x509.Certificate, caKey *rsa.PrivateKey, cn string, ous []string, targetBytes int) (certPEM, keyPEM string) {
@@ -55,10 +56,12 @@ func genLargeAICCertUDP(t *testing.T, dir string, caCert *x509.Certificate, caKe
 			t.Fatalf("exceeded 2000 caps at target %d (got %d)", targetBytes, len(der))
 		}
 	}
-	finalExt := largeAIC(caps)
-	extDER, _ := asn1.Marshal(finalExt)
-
 	clientKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	finalExt := largeAIC(caps)
+	if err := gwtest.SelfAuthorizeDA(clientKey, &finalExt); err != nil {
+		t.Fatalf("self-authorize AIC: %v", err)
+	}
+	extDER, _ := asn1.Marshal(finalExt)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: cn, OrganizationalUnit: ous},

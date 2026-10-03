@@ -180,6 +180,13 @@ func (l *ListenerConfig) RequireUserAuthEnabled() bool {
 	return l.TLS.RequireUserAuthEnabled()
 }
 
+// SkipDelegationAuthVerificationEnabled reports whether the mandatory
+// DelegationAuthorization verification is disabled for this listener
+// (default false: the check runs).
+func (l *ListenerConfig) SkipDelegationAuthVerificationEnabled() bool {
+	return l.TLS.SkipDelegationAuthVerificationEnabled()
+}
+
 // RequireDelegationEnabled returns whether dual-certificate delegation mode is required.
 func (l *ListenerConfig) RequireDelegationEnabled() bool {
 	if l.UDPExt != nil {

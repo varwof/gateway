@@ -5,9 +5,9 @@ go 1.26.2
 require (
 	github.com/pion/dtls/v2 v2.2.12
 	github.com/quic-go/quic-go v0.48.2
-	github.com/varwof/gateway-core v0.4.7
+	github.com/varwof/gateway-core v0.5.2
 	github.com/varwof/register v0.1.0
-	github.com/varwof/types v0.4.1
+	github.com/varwof/types v0.7.1
 	golang.org/x/net v0.56.0
 )
 
@@ -21,6 +21,7 @@ require (
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/transport/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
+	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/varwof/pkcs7 v0.1.0 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.uber.org/mock v0.4.0 // indirect

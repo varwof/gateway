@@ -231,8 +231,11 @@ func TestProxyHandleRequestDelegatedAgentGSFull(t *testing.T) {
 		if req.Header.Get("X-Agent-TTL") != "" {
 			t.Errorf("X-Agent-TTL should not be set without GS extension, got %q", req.Header.Get("X-Agent-TTL"))
 		}
-		if !strings.Contains(req.Header.Get("X-AIC-Verified-By"), "1.2.840.10045") {
-			t.Errorf("X-AIC-Verified-By = %q, want ECDSA algorithm OID", req.Header.Get("X-AIC-Verified-By"))
+		// X-AIC-Verified-By reflects the DA signature algorithm. The fixture leaf
+		// key is RSA (genKey), and the self-authorized DA is signed with it, so the
+		// header names the RSA OID rather than the previously-hardcoded ECDSA one.
+		if !strings.Contains(req.Header.Get("X-AIC-Verified-By"), "1.2.840.113549.1.1.11") {
+			t.Errorf("X-AIC-Verified-By = %q, want RSA algorithm OID", req.Header.Get("X-AIC-Verified-By"))
 		}
 	}
 

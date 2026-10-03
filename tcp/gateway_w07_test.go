@@ -19,6 +19,7 @@ import (
 	"time"
 
 	gw "github.com/varwof/gateway-core"
+	"github.com/varwof/gateway/internal/gwtest"
 )
 
 // g3TestEvaluator is a stateful constraint executor for G3 integration tests: it starts rejecting
@@ -55,6 +56,9 @@ func makeAICClientCertWithConstraint(t *testing.T, dir string, caCert *x509.Cert
 			RequestedLifetime:  3600,
 			Reason:             gw.Reason{ReasonCode: "TEST", Description: "test"},
 		},
+	}
+	if err := gwtest.SelfAuthorizeDA(clientKey, &aic); err != nil {
+		t.Fatalf("self-authorize AIC: %v", err)
 	}
 	aicDER, err := asn1.Marshal(aic)
 	if err != nil {
